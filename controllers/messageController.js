@@ -1,6 +1,7 @@
 const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
+const { v1: uuidv1 } = require('uuid')
 
 exports.sendMessage = async (req, res) => {
   try {
@@ -17,6 +18,7 @@ exports.sendMessage = async (req, res) => {
     // Create the message
     const newMessage = new Message({
       conversationId,
+      messageId: uuidv1(), // Generate time-based UUID
       senderId,
       recipientId,
       type: 'TEXT',
@@ -67,13 +69,13 @@ exports.getMessagesForConversation = async (req, res) => {
       return res.status(400).json({ error: 'conversationId is required' })
     }
 
-    const pageSize = parseInt(limit, 10) || 10
+    const pageSize = parseInt(limit, 10) || 10 // Default to 10 messages per page
 
     // Query messages for the conversation, sorted by messageId (time-based uuid v1)
     const query = Message.query('conversationId')
       .eq(conversationId)
+      .sort('descending') // Sort by messageId in descending order (newest to oldest)◘
       .limit(pageSize)
-      .sort('descending') // Sort by messageId in descending order (newest to oldest)
 
     if (lastMessageId) {
       query.startAt({ conversationId, messageId: lastMessageId }) // Reconstruct the lastEvaluatedKey
@@ -88,6 +90,7 @@ exports.getMessagesForConversation = async (req, res) => {
         : null,
     })
   } catch (error) {
+    console.error('Error retrieving messages:', error)
     res.status(500).json({ error: error.message })
   }
 }
