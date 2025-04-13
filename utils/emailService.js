@@ -3,10 +3,10 @@ const crypto = require('crypto');
 
 // Tạo transporter cho Nodemailer
 const transporter = nodemailer.createTransport({
-   // service: process.env.EMAIL_SERVICE || 'gmail',
-   host: 'smtp.zoho.com',
+   service: 'gmail',
+   // host: "sandbox.smtp.mailtrap.io", // 'smtp.zoho.com',
    port: 465,
-   secure: true,
+   secure: false,
    auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD
@@ -60,6 +60,7 @@ exports.sendVerificationEmail = async (email, token, userId) => {
    try {
       // Gửi email sử dụng Nodemailer
       const result = await transporter.sendMail(mailOptions);
+      console.log('Email sent:', result);
 
       return result;
    } catch (error) {

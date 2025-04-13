@@ -1,4 +1,4 @@
-const { profile } = require('console');
+
 const dynamoose = require('../config/database');
 const crypto = require('crypto');
 
