@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Socket.IO Test Client</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  </head>
+  <body>
+    <h1>Socket.IO Test Client</h1>
+    <button id="joinRoom">Join Room</button>
+    <button id="sendMessage">Send Message</button>
+    <div id="messages"></div>
+
+    <script>
+      // Connect to the Socket.IO server
+      const socket = io('http://localhost:3000') // Replace with your server's URL if different
+
+      // Join a conversation room
+      document.getElementById('joinRoom').addEventListener('click', () => {
+        const conversationId = prompt('Enter conversation ID:')
+        socket.emit('joinConversation', conversationId)
+        console.log(`Joined conversation: ${conversationId}`)
+      })
+
+      // Send a message
+      document.getElementById('sendMessage').addEventListener('click', () => {
+        const conversationId = prompt('Enter conversation ID:')
+        const senderId = prompt('Enter sender ID:')
+        const recipientId = prompt('Enter recipient ID (optional):')
+        const content = prompt('Enter message content:')
+        socket.emit('sendMessage', {
+          conversationId,
+          senderId,
+          recipientId,
+          content,
+        })
+        console.log('Message sent:', {
+          conversationId,
+          senderId,
+          recipientId,
+          content,
+        })
+      })
+
+      // Listen for incoming messages
+      socket.on('receiveMessage', (message) => {
+        console.log('New message received:', message)
+        const messagesDiv = document.getElementById('messages')
+        const messageElement = document.createElement('div')
+        messageElement.textContent = `Message: ${message.content} (From: ${message.senderId})`
+        messagesDiv.appendChild(messageElement)
+      })
+
+      // Handle errors
+      socket.on('error', (error) => {
+        console.error('Error:', error)
+      })
+    </script>
+  </body>
+</html>

@@ -5,7 +5,6 @@ const http = require('http');
 const socketIo = require('socket.io');
 dotenv.config();
 
-const apiRoutes = require('./routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -37,16 +36,17 @@ app.get('/', (req, res) => {
    res.json({ message: 'Welcome to the API!' });
 });
 
-
 // Error handling middleware
 app.use((err, req, res, next) => {
    console.error(err.stack);
    res.status(500).json({
       success: false,
       message: 'Internal Server Error',
-      error: err.message
+      error: err.message,
    });
 });
+
+chatSocket(io); // Initialize chat socket
 
 // Start server
 server.listen(PORT, () => {

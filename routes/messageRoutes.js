@@ -26,7 +26,7 @@ router.post('/conversations/:conversationId/messages', sendMessage)
  * @returns { messages: Array, lastEvaluatedKey: string (optional) }
  */
 router.get(
-  'messsages/conversations/:conversationId/messages',
+  '/conversations/:conversationId/messages',
   getMessagesForConversation
 )
 
