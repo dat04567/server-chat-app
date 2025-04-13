@@ -2,10 +2,10 @@ const User = require('../models/userModel');
 const bcrypt = require('bcrypt');
 const { generateVerificationToken, sendVerificationEmail, generateVerificationCode } = require('../utils/emailService');
 const { handleError } = require('../utils');
-
+const jwt = require('jsonwebtoken');
 // Đăng ký tài khoản cho người dùng
 exports.register = async (req, res) => {
-   const { username, password, email } = req.body;
+   const { username, password, email, lastName, firstName } = req.body;
 
    try {
       // Kiểm tra username đã tồn tại chưa
@@ -16,7 +16,7 @@ exports.register = async (req, res) => {
       if (existingUserByUsername && existingUserByUsername.length > 0) {
          return res.status(400).json({
             success: false,
-            message: 'Tên ngườưi dùng đã tồn tại, vui lòng chọn tên khác'
+            error: 'Tên ngườưi dùng đã tồn tại, vui lòng chọn tên khác'
          });
       }
 
@@ -28,7 +28,7 @@ exports.register = async (req, res) => {
       if (existingUserByEmail && existingUserByEmail.length > 0) {
          return res.status(400).json({
             success: false,
-            message: 'Email đã tồn tại, vui lòng sử dụng email khác'
+            error: 'Email đã tồn tại, vui lòng sử dụng email khác'
          });
       }
 
@@ -46,6 +46,10 @@ exports.register = async (req, res) => {
          email,
          password: hashedPassword, // Lưu mật khẩu đã được hash
          role: 'user', // Đảm bảo người đăng ký chỉ có quyền user
+         profile: {
+            firstName,
+            lastName,
+         },
          isVerified: false,
          verificationToken,
          verificationExpires,
@@ -55,8 +59,6 @@ exports.register = async (req, res) => {
       };
 
       const user = await User.create(userData);
-
-
 
       // Send verification email
       try {
@@ -120,7 +122,6 @@ exports.login = async (req, res) => {
       }
 
       // Tạo JWT token
-      const jwt = require('jsonwebtoken');
       const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-123456-change-in-production';
       const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d';
 

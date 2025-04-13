@@ -1,3 +1,4 @@
+const { profile } = require('console');
 const dynamoose = require('../config/database');
 const crypto = require('crypto');
 
@@ -29,8 +30,12 @@ const userSchema = new dynamoose.Schema({
    },
    role: {
       type: String,
-      enum: ['user', 'admin'],
+      enum: ['user', 'admin', 'bot'],
       default: 'user'
+   },
+   bio: {
+      type: String,
+      default: ''
    },
    isVerified: {
       type: Boolean,
@@ -46,9 +51,35 @@ const userSchema = new dynamoose.Schema({
       type: String,
       default: new Date().toISOString()
    },
+   profile: {
+      type: Object,
+      schema: {
+         firstName: {
+            type: String,
+            required: true
+         },
+         lastName: {
+            type: String,
+            required: true
+         },
+         phone: {
+            type: String,
+            default: ''
+         },
+      }
+   },
    createAt: {
       type: String,
       default: new Date().toISOString()
+   },
+   lastSeen: {
+      type: String,
+      default: new Date().toISOString()
+   },
+   status: {
+      type: String,
+      enum: ['ONLINE', 'OFFLINE'],
+      default: 'OFFLINE'
    },
    updateAt: {
       type: String,
