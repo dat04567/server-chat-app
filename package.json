@@ -29,6 +29,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.0",
     "resend": "^4.2.0",
+    "socket.io": "^4.8.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

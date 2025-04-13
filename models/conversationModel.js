@@ -1,5 +1,5 @@
-const dynamoose = require('../config/database')
-const { v4: uuidv4 } = require('uuid') // Import UUID v4 for unique IDs
+const dynamoose = require('../config/database');
+const { v4: uuidv4 } = require('uuid'); // Import UUID v4 for unique IDs
 
 const conversationSchema = new dynamoose.Schema({
   // Partition Key
@@ -17,7 +17,7 @@ const conversationSchema = new dynamoose.Schema({
   participantPairKey: {
     type: String,
     required: function () {
-      return this.type === 'ONE-TO-ONE'
+      return this.type === 'ONE-TO-ONE';
     },
     index: {
       global: true,
@@ -34,7 +34,7 @@ const conversationSchema = new dynamoose.Schema({
   creatorId: {
     type: String,
     required: function () {
-      return this.type === 'GROUP'
+      return this.type === 'GROUP';
     },
   },
   // Common fields
@@ -56,7 +56,7 @@ const conversationSchema = new dynamoose.Schema({
     type: Boolean,
     default: false,
   },
-})
+});
 
-const Conversation = dynamoose.model('conversations', conversationSchema)
-module.exports = Conversation
+const Conversation = dynamoose.model('Conversations', conversationSchema);
+module.exports = Conversation;
