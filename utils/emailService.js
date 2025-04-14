@@ -1,18 +1,18 @@
-const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
-const crypto = require('crypto');
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses')
+const crypto = require('crypto')
 
 // Initialize the AWS SES client
 const sesClient = new SESClient({
-   region: process.env.AWS_REGION || 'us-east-1'
-});
+  region: process.env.AWS_REGION || 'us-east-1',
+})
 
 /**
  * Generate a random verification token
  * @returns {string} Random verification token
  */
 exports.generateVerificationToken = () => {
-   return crypto.randomBytes(32).toString('hex');
-};
+  return crypto.randomBytes(32).toString('hex')
+}
 
 /**
  * Send verification email with verification link using AWS SES
@@ -22,28 +22,28 @@ exports.generateVerificationToken = () => {
  * @returns {Promise} - Promise object representing the operation
  */
 exports.sendVerificationEmail = async (email, token, userId) => {
-   // Construct verification URL
-   const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-   const verifyUrl = `${baseUrl}/verify-email?token=${token}&userId=${userId}`;
+  // Construct verification URL
+  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000/api/auth'
+  const verifyUrl = `${baseUrl}/verify-email?token=${token}&userId=${userId}`
 
-   // Set up email parameters
-   const params = {
-      Source: process.env.SES_EMAIL_FROM || 'your-verified-email@example.com', // Must be verified in SES
-      Destination: {
-         ToAddresses: [email],
+  // Set up email parameters
+  const params = {
+    Source: process.env.SES_EMAIL_FROM || 'your-verified-email@example.com', // Must be verified in SES
+    Destination: {
+      ToAddresses: [email],
+    },
+    Message: {
+      Subject: {
+        Data: 'Xác Minh Email',
+        Charset: 'UTF-8',
       },
-      Message: {
-         Subject: {
-            Data: 'Xác Minh Email',
-            Charset: 'UTF-8',
-         },
-         Body: {
-            Text: {
-               Data: `Vui lòng xác minh email của bạn bằng cách nhấp vào liên kết sau: ${verifyUrl}. Liên kết này sẽ hết hạn trong vòng 1 giờ.`,
-               Charset: 'UTF-8',
-            },
-            Html: {
-               Data: `
+      Body: {
+        Text: {
+          Data: `Vui lòng xác minh email của bạn bằng cách nhấp vào liên kết sau: ${verifyUrl}. Liên kết này sẽ hết hạn trong vòng 1 giờ.`,
+          Charset: 'UTF-8',
+        },
+        Html: {
+          Data: `
             <html>
               <body>
                 <h1>Xác Minh Email</h1>
@@ -57,19 +57,19 @@ exports.sendVerificationEmail = async (email, token, userId) => {
               </body>
             </html>
           `,
-               Charset: 'UTF-8',
-            },
-         },
+          Charset: 'UTF-8',
+        },
       },
-   };
+    },
+  }
 
-   try {
-      // Send the email
-      const command = new SendEmailCommand(params);
-      const result = await sesClient.send(command);
-      return result;
-   } catch (error) {
-      console.error('Error sending email:', error);
-      throw error;
-   }
-};
+  try {
+    // Send the email
+    const command = new SendEmailCommand(params)
+    const result = await sesClient.send(command)
+    return result
+  } catch (error) {
+    console.error('Error sending email:', error)
+    throw error
+  }
+}

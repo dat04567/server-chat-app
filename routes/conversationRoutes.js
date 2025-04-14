@@ -4,58 +4,69 @@ const {
   getConversationById,
   getConversationsForUser,
 } = require('../controllers/conversationController')
+const {
+  getMessagesForConversation,
+  sendMessage,
+  getMessageById,
+} = require('../controllers/messageController')
 
 const router = express.Router()
 
 /**
- * @route   POST /conversations/one-to-one
+ * @route   POST /api/conversations/one-to-one
  * @desc    Create a ONE-TO-ONE conversation between two users with an initial message
- * @access  Public
- * @body    { senderId: string, recipientId: string, content: string }
- * @returns {
- *   conversation: {
- *     conversationId: string,
- *     type: string,
- *     participantPairKey: string,
- *     lastMessageText: string,
- *     lastMessageAt: string,
- *     createdAt: string,
- *     updatedAt: string,
- *     isDeleted: boolean
- *   },
- *   initialMessage: {
- *     conversationId: string,
- *     messageId: string,
- *     senderId: string,
- *     recipientId: string,
- *     type: string,
- *     content: string,
- *     createdAt: string,
- *     updatedAt: string
- *   }
- * }
- *
- * @returns {conversation} if the conversation already exists, it returns the existing conversation
+ * @access  Authenticated user
+ * @body    { recipientId: string, content: string }
+ * @returns { message : string, conversation : object, initialMessage : object }
+ * @returns { message : string, conversation : object} if the conversation already exists, it returns the existing conversation
  */
 router.post('/one-to-one', createOneToOneConversation)
 
 /**
- * @route   GET /conversations/:conversationId
+ * @route   GET /api/conversations/
+ * @desc    Get all conversations for a specific user (chronological order and pagination)
+ * @access  Authenticated user
+ * @query   { limit?: number, lastEvaluatedKey?: string }
+ * @returns { conversations: Array | [], lastEvaluatedKey: string | null }
+ */
+router.get('/', getConversationsForUser)
+
+/**
+ * @route   GET /api/conversations/:conversationId
  * @desc    Get a specific conversation by its ID
- * @access  Public
+ * @access  Authenticated user
  * @params  { conversationId: string }
- * @returns { conversationItem }
+ * @returns { conversation: object }
  */
 router.get('/:conversationId', getConversationById)
 
 /**
- * @route   GET /users/:userId/conversations
- * @desc    Get all conversations for a specific user (chronological order and pagination)
- * @access  Public
- * @params  { userId: string }
- * @query   { limit?: number, pageToken?: string }
- * @returns { conversations: Array | [], lastEvaluatedKey: string | null }
+ * @route   GET /api/conversations/:conversationId/messages
+ * @desc    Get messages for a specific conversation with pagination (latest to oldest)
+ * @access  Authenticated user
+ * @params  { conversationId: string }
+ * @query   { limit?: number, lastEvaluatedKey?: string }
+ * @returns { messages: Array | [], lastEvaluatedKey: string | null }
  */
-router.get('/users/:userId/conversations', getConversationsForUser)
+router.get('/:conversationId/messages', getMessagesForConversation)
+
+/**
+ * @route   POST /api/conversations/:conversationId/messages
+ * @desc    Send a new message to a specific conversation
+ * @access  Authenticated user
+ * @params  { conversationId: string }
+ * @body    { content: string }
+ * @returns { message: string, savedMessage: object }
+ */
+router.post('/:conversationId/messages', sendMessage)
+
+/**
+ * @route   GET /api/conversations/:conversationId/messages/:messageId
+ * @desc    Get a specific message in a conversation
+ * @access  Public
+ * @params  { conversationId: string, messageId: string }
+ * @returns { message: object }
+ */
+router.get('/:conversationId/messages/:messageId', getMessageById)
 
 module.exports = router

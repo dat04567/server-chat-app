@@ -12,11 +12,19 @@ if (process.env.NODE_ENV === 'development') {
   dynamoose.aws.ddb.local(
     process.env.DYNAMODB_LOCAL_ENDPOINT || 'http://localhost:8000'
   )
-  // Disable automatic table creation and updates
-  dynamoose.Table.defaults.set({
-    create: false, // Do not create tables automatically
-    update: false, // Do not update tables automatically
-  })
 }
+
+// Configure Dynamoose defaults
+dynamoose.Table.defaults.set({
+  create: true, // Create the table if it doesn't exist
+  update: false, // Do not modify existing tables
+  waitForActive: {
+    enabled: true, // Wait for the table to become active
+    check: {
+      timeout: 180000, // Wait up to 3 minutes
+      frequency: 1000, // Check every 1 second
+    },
+  },
+})
 
 module.exports = dynamoose

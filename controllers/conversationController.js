@@ -1,19 +1,21 @@
 const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
+const { v1: uuidv1 } = require('uuid') // Import UUID v1 for unique and time-ordered IDs
 
 /**
  * Create a ONE-TO-ONE conversation
  */
 exports.createOneToOneConversation = async (req, res) => {
   try {
-    const { senderId, recipientId, content } = req.body
+    const { recipientId, content } = req.body
+    const senderId = req.user.id // Use the authenticated user's ID from authMiddleware
 
     // Validate input
-    if (!senderId || !recipientId || !content) {
+    if (!recipientId || !content) {
       return res.status(400).json({
         error:
-          'senderId, recipientId, and initial message content are required to create a conversation',
+          'recipientId and initial message content are required for creating a ONE-TO-ONE conversation',
       })
     }
 
@@ -27,7 +29,10 @@ exports.createOneToOneConversation = async (req, res) => {
       .exec()
 
     if (existingConversation.length > 0) {
-      return res.status(200).json(existingConversation[0]) // Return the existing conversation
+      return res.status(200).json({
+        message: 'Conversation already exists',
+        conversation: existingConversation[0],
+      }) // Return the existing conversation
     }
 
     // Create the new conversation
@@ -63,17 +68,20 @@ exports.createOneToOneConversation = async (req, res) => {
     // Create the initial message in the Messages table
     const newMessage = new Message({
       conversationId: savedConversation.conversationId,
+      messageId: uuidv1(), // Generate a unique message ID
       senderId,
       recipientId,
       type: 'TEXT',
       content,
       createdAt: savedConversation.lastMessageAt,
+      updatedAt: savedConversation.lastMessageAt,
     })
 
     const savedMessage = await newMessage.save()
 
     // Return the full conversation details along with the initial message
     res.status(201).json({
+      message: 'Conversation created successfully',
       conversation: savedConversation,
       initialMessage: savedMessage,
     })
@@ -88,40 +96,7 @@ exports.createOneToOneConversation = async (req, res) => {
  * incomplete
  */
 exports.createGroupConversation = async (req, res) => {
-  try {
-    const { creatorId, groupName, groupImage } = req.body
-
-    // Validate input
-    if (!creatorId) {
-      return res
-        .status(400)
-        .json({ error: 'creatorId is required for GROUP conversations' })
-    }
-
-    // Create the conversation
-    const newConversation = new Conversation({
-      type: 'GROUP',
-      groupName: groupName || 'Unnamed Group', // Default group name
-      groupImage: groupImage || 'default-group-image.png', // Default group image
-      creatorId,
-    })
-
-    const savedConversation = await newConversation.save()
-
-    // Add the creator as a participant in the ConversationParticipants table
-    const creatorParticipant = {
-      userId: creatorId,
-      conversationId: savedConversation.conversationId,
-      isAdmin: true, // Creator is the admin
-      lastMessageAt: new Date().toISOString(),
-    }
-
-    await ConversationParticipants.create(creatorParticipant)
-
-    res.status(201).json(savedConversation)
-  } catch (error) {
-    res.status(500).json({ error: error.message })
-  }
+  // implement later
 }
 
 /**
@@ -130,6 +105,17 @@ exports.createGroupConversation = async (req, res) => {
 exports.getConversationById = async (req, res) => {
   try {
     const { conversationId } = req.params
+    const userId = req.user.id // Use the authenticated user's ID from authMiddleware
+
+    // Check if the user is a participant in the conversation
+    const isAuthorized = await isUserInConversation(userId, conversationId)
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: 'Access denied. You are not a participant in this conversation.',
+      })
+    }
+
+    // Fetch the conversation
     const conversation = await Conversation.get(conversationId)
 
     if (!conversation) {
@@ -149,12 +135,8 @@ exports.getConversationById = async (req, res) => {
  */
 exports.getConversationsForUser = async (req, res) => {
   try {
-    const { userId } = req.params
+    const userId = req.user.id // Use the authenticated user's ID from authMiddleware
     const { limit, lastEvaluatedKey } = req.query
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' })
-    }
 
     const pageSize = parseInt(limit, 10) || 10
 
@@ -216,4 +198,16 @@ exports.getConversationsForUser = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
+}
+
+/**
+ * Check if a user is in a conversation
+ */
+const isUserInConversation = async (userId, conversationId) => {
+  const participant = await ConversationParticipants.query('conversationId')
+    .eq(conversationId)
+    .where('userId')
+    .eq(userId)
+    .exec()
+  return participant.length > 0
 }

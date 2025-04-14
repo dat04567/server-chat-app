@@ -3,16 +3,40 @@ const ConversationParticipants = require('../models/conversationParticipantsMode
 const Message = require('../models/messageModel')
 const { v1: uuidv1 } = require('uuid')
 
+/**
+ * Check if a user is in a conversation
+ */
+const isUserInConversation = async (userId, conversationId) => {
+  const participant = await ConversationParticipants.query('conversationId')
+    .eq(conversationId)
+    .where('userId')
+    .eq(userId)
+    .exec()
+  return participant.length > 0
+}
+
+/**
+ * Send a message in a conversation
+ */
 exports.sendMessage = async (req, res) => {
   try {
     const { conversationId } = req.params // Extract conversationId from req.params
-    const { senderId, recipientId, content } = req.body // Extract other fields from req.body
+    const { content } = req.body // Extract content from req.body
+    const senderId = req.user.id // Use the authenticated user's ID from authMiddleware
 
     // Validate input
-    if (!conversationId || !senderId || !content) {
+    if (!conversationId || !content) {
       return res
         .status(400)
-        .json({ error: 'conversationId, senderId, and content are required' })
+        .json({ error: 'conversationId and content are required' })
+    }
+
+    // Check if the user is a participant in the conversation
+    const isAuthorized = await isUserInConversation(senderId, conversationId)
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: 'Access denied. You are not a participant in this conversation.',
+      })
     }
 
     // Create the message
@@ -20,7 +44,6 @@ exports.sendMessage = async (req, res) => {
       conversationId,
       messageId: uuidv1(), // Generate time-based UUID
       senderId,
-      recipientId,
       type: 'TEXT',
       content,
     })
@@ -54,19 +77,35 @@ exports.sendMessage = async (req, res) => {
       )
     )
 
-    res.status(201).json(savedMessage)
+    res.status(201).json({
+      message: 'Message sent successfully',
+      savedMessage,
+    })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
 }
 
+/**
+ * Get messages for a conversation with pagination
+ */
 exports.getMessagesForConversation = async (req, res) => {
   try {
     const { conversationId } = req.params // Extract conversationId from req.params
-    const { limit, lastMessageId } = req.query // Extract lastMessageId from req.query
+    const { limit, lastMessageId } = req.query // Extract pagination parameters
+    const userId = req.user.id // Use the authenticated user's ID from authMiddleware
 
+    // Validate input
     if (!conversationId) {
       return res.status(400).json({ error: 'conversationId is required' })
+    }
+
+    // Check if the user is a participant in the conversation
+    const isAuthorized = await isUserInConversation(userId, conversationId)
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: 'Access denied. You are not a participant in this conversation.',
+      })
     }
 
     const pageSize = parseInt(limit, 10) || 10 // Default to 10 messages per page
@@ -74,7 +113,7 @@ exports.getMessagesForConversation = async (req, res) => {
     // Query messages for the conversation, sorted by messageId (time-based uuid v1)
     const query = Message.query('conversationId')
       .eq(conversationId)
-      .sort('descending') // Sort by messageId in descending order (newest to oldest)◘
+      .sort('descending') // Sort by messageId in descending order (newest to oldest)
       .limit(pageSize)
 
     if (lastMessageId) {
@@ -90,19 +129,31 @@ exports.getMessagesForConversation = async (req, res) => {
         : null,
     })
   } catch (error) {
-    console.error('Error retrieving messages:', error)
     res.status(500).json({ error: error.message })
   }
 }
 
+/**
+ * Get a specific message by ID
+ */
 exports.getMessageById = async (req, res) => {
   try {
     const { conversationId, messageId } = req.params
+    const userId = req.user.id // Use the authenticated user's ID from authMiddleware
 
+    // Validate input
     if (!conversationId || !messageId) {
       return res
         .status(400)
         .json({ error: 'conversationId and messageId are required' })
+    }
+
+    // Check if the user is a participant in the conversation
+    const isAuthorized = await isUserInConversation(userId, conversationId)
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: 'Access denied. You are not a participant in this conversation.',
+      })
     }
 
     const message = await Message.get({ conversationId, messageId })
