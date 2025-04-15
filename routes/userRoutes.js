@@ -14,6 +14,11 @@ const { authMiddleware, adminMiddleware } = require('../middleware/authMiddlewar
 // @access  Admin
 router.get('/', authMiddleware, adminMiddleware, userController.getAllUsers);
 
+// @route   GET /api/users/search
+// @desc    Tìm kiếm người dùng theo tên (cho mục đích tìm kiếm bạn bè)
+// @access  Tất cả người dùng đã đăng nhập
+router.get('/search', authMiddleware, userController.searchUsersByName);
+
 // @route   GET /api/users/:id
 // @desc    Lấy thông tin người dùng theo ID
 // @access  Admin hoặc chính người dùng đó

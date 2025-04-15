@@ -1,13 +1,14 @@
 const express = require('express')
 const {
   createOneToOneConversation,
+  createGroupConversation,
   getConversationById,
-  getConversationsForUser,
+  getConversationsForUser
 } = require('../controllers/conversationController')
 const {
   getMessagesForConversation,
   sendMessage,
-  getMessageById,
+  getMessageById
 } = require('../controllers/messageController')
 
 const router = express.Router()
@@ -36,7 +37,11 @@ router.get('/', getConversationsForUser)
  * @desc    Get a specific conversation by its ID
  * @access  Authenticated user
  * @params  { conversationId: string }
- * @returns { conversation: object }
+ * @returns {
+ *   conversation: conversation: object,
+ *   participants: participantItem[],
+ *   messages: messageItem[]
+ * }
  */
 router.get('/:conversationId', getConversationById)
 
@@ -64,6 +69,9 @@ router.post('/:conversationId/messages', sendMessage)
  * @route   GET /api/conversations/:conversationId/messages/:messageId
  * @desc    Get a specific message in a conversation
  * @access  Public
+ * @params  { userId: string }
+ * @query   { limit?: number, lastEvaluatedKey?: string }
+ * @returns { conversations: Array | [], lastEvaluatedKey: string | null }
  * @params  { conversationId: string, messageId: string }
  * @returns { message: object }
  */

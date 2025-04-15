@@ -36,6 +36,10 @@ exports.createOneToOneConversation = async (req, res) => {
       .eq(participantPairKey)
       .exec()
 
+    console.log(existingConversation)
+
+    let savedConversation, savedMessage
+
     if (existingConversation.length > 0) {
       return res.status(200).json({
         message: 'Conversation already exists',
@@ -86,7 +90,7 @@ exports.createOneToOneConversation = async (req, res) => {
 
     const savedMessage = await newMessage.save()
 
-    // Return the full conversation details along with the initial message
+    // Return the full conversation details along with the message
     res.status(201).json({
       message: 'Conversation created successfully',
       conversation: savedConversation,
@@ -99,8 +103,6 @@ exports.createOneToOneConversation = async (req, res) => {
 
 /**
  * Create a GROUP conversation
- * also need member ids
- * incomplete
  */
 exports.createGroupConversation = async (req, res) => {
   // implement later

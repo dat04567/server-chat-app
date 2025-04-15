@@ -41,6 +41,51 @@ exports.getUserById = async (req, res) => {
    }
 };
 
+// Search users by name
+exports.searchUsersByName = async (req, res) => {
+   try {
+      const { name } = req.query;
+
+      // Kiểm tra xem có tham số tìm kiếm không
+      if (!name) {
+         return res.status(400).json({
+            success: false,
+            error: 'Vui lòng cung cấp tham số tìm kiếm (name)'
+         });
+      }
+
+      // Tìm kiếm người dùng có firstName hoặc lastName chứa từ khóa tìm kiếm
+      // Tối ưu hóa bằng cách giới hạn số lượng kết quả và chỉ trả về thông tin cần thiết
+      const users = await User.scan()
+         .where('profile.firstName')
+         .contains(name)
+         .or()
+         .where('profile.lastName')
+         .contains(name)
+         .attributes(['id', 'username', 'profile', 'status', 'lastSeen']) // Chỉ lấy các trường cần thiết
+         .limit(20) // Giới hạn kết quả để tăng hiệu suất
+         .exec();
+
+      // Lọc thông tin người dùng (không trả về thông tin nhạy cảm)
+      const filteredUsers = users.map(user => ({
+         id: user.id,
+         username: user.username,
+         profile: user.profile,
+         status: user.status,
+         lastSeen: user.lastSeen
+      }));
+
+      res.status(200).json({
+         success: true,
+         count: filteredUsers.length,
+         data: filteredUsers
+      });
+   } catch (error) {
+      error.message = 'Không thể tìm kiếm người dùng';
+      handleError(error, req, res);
+   }
+};
+
 // Create new user (Admin only)
 exports.createUser = async (req, res) => {
    try {
