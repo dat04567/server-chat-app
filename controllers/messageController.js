@@ -1,7 +1,6 @@
 const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
-const { v1: uuidv1 } = require('uuid')
 
 /**
  * Check if a user is in a conversation
@@ -35,17 +34,16 @@ exports.sendMessage = async (req, res) => {
     const isAuthorized = await isUserInConversation(senderId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.',
+        error: 'Access denied. You are not a participant in this conversation.'
       })
     }
 
     // Create the message
     const newMessage = new Message({
       conversationId,
-      messageId: uuidv1(), // Generate time-based UUID
       senderId,
       type: 'TEXT',
-      content,
+      content
     })
 
     const savedMessage = await newMessage.save()
@@ -70,7 +68,7 @@ exports.sendMessage = async (req, res) => {
         ConversationParticipants.update(
           {
             userId: participant.userId,
-            conversationId: participant.conversationId,
+            conversationId: participant.conversationId
           }, // Composite key
           { lastMessageAt }
         )
@@ -79,7 +77,7 @@ exports.sendMessage = async (req, res) => {
 
     res.status(201).json({
       message: 'Message sent successfully',
-      savedMessage,
+      savedMessage
     })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -104,7 +102,7 @@ exports.getMessagesForConversation = async (req, res) => {
     const isAuthorized = await isUserInConversation(userId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.',
+        error: 'Access denied. You are not a participant in this conversation.'
       })
     }
 
@@ -121,12 +119,13 @@ exports.getMessagesForConversation = async (req, res) => {
     }
 
     const messages = await query.exec()
+    console.log(messages)
 
     res.status(200).json({
       messages,
       lastEvaluatedKey: messages.lastKey
         ? { messageId: messages.lastKey.messageId } // Only return the messageId
-        : null,
+        : null
     })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -139,6 +138,8 @@ exports.getMessagesForConversation = async (req, res) => {
 exports.getMessageById = async (req, res) => {
   try {
     const { conversationId, messageId } = req.params
+
+    console.log(conversationId + ' --- ' + messageId)
     const userId = req.user.id // Use the authenticated user's ID from authMiddleware
 
     // Validate input
@@ -152,7 +153,7 @@ exports.getMessageById = async (req, res) => {
     const isAuthorized = await isUserInConversation(userId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.',
+        error: 'Access denied. You are not a participant in this conversation.'
       })
     }
 

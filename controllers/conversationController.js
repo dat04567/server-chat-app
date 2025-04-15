@@ -1,7 +1,7 @@
 const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
-const { v1: uuidv1 } = require('uuid') // Import UUID v1 for unique and time-ordered IDs
+const User = require('../models/userModel')
 
 /**
  * Create a ONE-TO-ONE conversation
@@ -15,7 +15,15 @@ exports.createOneToOneConversation = async (req, res) => {
     if (!recipientId || !content) {
       return res.status(400).json({
         error:
-          'recipientId and initial message content are required for creating a ONE-TO-ONE conversation',
+          'recipientId and initial message content are required for creating a ONE-TO-ONE conversation'
+      })
+    }
+
+    // Verify that the recipient exists
+    const recipient = await User.get(recipientId) // Assuming User is your user model
+    if (!recipient) {
+      return res.status(404).json({
+        error: 'Recipient does not exist'
       })
     }
 
@@ -31,7 +39,7 @@ exports.createOneToOneConversation = async (req, res) => {
     if (existingConversation.length > 0) {
       return res.status(200).json({
         message: 'Conversation already exists',
-        conversation: existingConversation[0],
+        conversation: existingConversation[0]
       }) // Return the existing conversation
     }
 
@@ -40,7 +48,7 @@ exports.createOneToOneConversation = async (req, res) => {
       type: 'ONE-TO-ONE',
       participantPairKey,
       lastMessageText: content, // Set the initial message as the last message
-      lastMessageAt: new Date().toISOString(), // Set the timestamp of the initial message
+      lastMessageAt: new Date().toISOString() // Set the timestamp of the initial message
     })
 
     const savedConversation = await newConversation.save()
@@ -50,13 +58,13 @@ exports.createOneToOneConversation = async (req, res) => {
       {
         userId: senderId,
         conversationId: savedConversation.conversationId,
-        lastMessageAt: savedConversation.lastMessageAt,
+        lastMessageAt: savedConversation.lastMessageAt
       },
       {
         userId: recipientId,
         conversationId: savedConversation.conversationId,
-        lastMessageAt: savedConversation.lastMessageAt,
-      },
+        lastMessageAt: savedConversation.lastMessageAt
+      }
     ]
 
     await Promise.all(
@@ -68,13 +76,12 @@ exports.createOneToOneConversation = async (req, res) => {
     // Create the initial message in the Messages table
     const newMessage = new Message({
       conversationId: savedConversation.conversationId,
-      messageId: uuidv1(), // Generate a unique message ID
       senderId,
       recipientId,
       type: 'TEXT',
       content,
       createdAt: savedConversation.lastMessageAt,
-      updatedAt: savedConversation.lastMessageAt,
+      updatedAt: savedConversation.lastMessageAt
     })
 
     const savedMessage = await newMessage.save()
@@ -83,7 +90,7 @@ exports.createOneToOneConversation = async (req, res) => {
     res.status(201).json({
       message: 'Conversation created successfully',
       conversation: savedConversation,
-      initialMessage: savedMessage,
+      initialMessage: savedMessage
     })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -111,7 +118,7 @@ exports.getConversationById = async (req, res) => {
     const isAuthorized = await isUserInConversation(userId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.',
+        error: 'Access denied. You are not a participant in this conversation.'
       })
     }
 
@@ -157,7 +164,7 @@ exports.getConversationsForUser = async (req, res) => {
     if (participantRecords.length === 0) {
       return res.status(200).json({
         conversations: [],
-        lastEvaluatedKey: null,
+        lastEvaluatedKey: null
       })
     }
 
@@ -193,7 +200,7 @@ exports.getConversationsForUser = async (req, res) => {
     // Step 7: Return the results
     res.status(200).json({
       conversations: paginatedConversations,
-      lastEvaluatedKey: nextPageToken,
+      lastEvaluatedKey: nextPageToken
     })
   } catch (error) {
     res.status(500).json({ error: error.message })

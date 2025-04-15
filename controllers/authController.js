@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt')
 const {
   generateVerificationToken,
   sendVerificationEmail,
-  generateVerificationCode,
+  generateVerificationCode
 } = require('../utils/emailService')
 const { handleError } = require('../utils')
 
@@ -14,30 +14,31 @@ exports.register = async (req, res) => {
   try {
     // Kiểm tra username đã tồn tại chưa
     const existingUserByUsername = await User.scan({
-      username: { eq: username },
+      username: { eq: username }
     }).exec()
 
     if (existingUserByUsername && existingUserByUsername.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Tên ngườưi dùng đã tồn tại, vui lòng chọn tên khác',
+        message: 'Tên ngườưi dùng đã tồn tại, vui lòng chọn tên khác'
       })
     }
 
     // Kiểm tra email đã tồn tại chưa
     const existingUserByEmail = await User.scan({
-      email: { eq: email },
+      email: { eq: email }
     }).exec()
 
     if (existingUserByEmail && existingUserByEmail.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Email đã tồn tại, vui lòng sử dụng email khác',
+        message: 'Email đã tồn tại, vui lòng sử dụng email khác'
       })
     }
 
     // Generate verification token
     const verificationToken = generateVerificationToken()
+    console.log(verificationToken)
     // Set expiration time (1 hour from now)
     const verificationExpires = Date.now() + 300000 // 5 minutes in milliseconds
 
@@ -55,7 +56,7 @@ exports.register = async (req, res) => {
       verificationExpires,
       createAt: new Date().toISOString(),
       updateAt: new Date().toISOString(),
-      lastActive: new Date().toISOString(),
+      lastActive: new Date().toISOString()
     }
 
     const user = await User.create(userData)
@@ -76,8 +77,8 @@ exports.register = async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        isVerified: user.isVerified,
-      },
+        isVerified: user.isVerified
+      }
     })
   } catch (error) {
     error.statusCode = 400
@@ -94,13 +95,13 @@ exports.login = async (req, res) => {
   try {
     // Tìm người dùng bằng email
     const users = await User.scan({
-      email: { eq: email },
+      email: { eq: email }
     }).exec()
 
     if (!users || users.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Email hoặc mật khẩu không chính xác',
+        error: 'Email hoặc mật khẩu không chính xác'
       })
     }
 
@@ -111,7 +112,7 @@ exports.login = async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        error: 'Email hoặc mật khẩu không chính xác',
+        error: 'Email hoặc mật khẩu không chính xác'
       })
     }
 
@@ -120,7 +121,7 @@ exports.login = async (req, res) => {
       return res.status(403).json({
         success: false,
         error:
-          'Tài khoản chưa được xác thực email. Vui lòng xác thực email trước khi đăng nhập.',
+          'Tài khoản chưa được xác thực email. Vui lòng xác thực email trước khi đăng nhập.'
       })
     }
 
@@ -131,13 +132,13 @@ exports.login = async (req, res) => {
     const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d'
 
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
-      expiresIn: JWT_EXPIRES_IN,
+      expiresIn: JWT_EXPIRES_IN
     })
 
     // Cập nhật thời gian hoạt động cuối cùng
     await User.update({
       id: user.id,
-      lastActive: new Date().toISOString(),
+      lastActive: new Date().toISOString()
     })
 
     res.status(200).json({
@@ -149,9 +150,9 @@ exports.login = async (req, res) => {
           id: user.id,
           username: user.username,
           email: user.email,
-          role: user.role,
-        },
-      },
+          role: user.role
+        }
+      }
     })
   } catch (error) {
     error.statusCode = 500
@@ -182,7 +183,7 @@ exports.verifyEmail = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'Không tìm thấy người dùng',
+        error: 'Không tìm thấy người dùng'
       })
     }
 
@@ -190,7 +191,7 @@ exports.verifyEmail = async (req, res) => {
     if (user.isVerified) {
       return res.status(400).json({
         success: false,
-        error: 'Email đã được xác thực trước đó',
+        error: 'Email đã được xác thực trước đó'
       })
     }
 
@@ -198,7 +199,7 @@ exports.verifyEmail = async (req, res) => {
     if (user.verificationToken !== token) {
       return res.status(400).json({
         success: false,
-        error: 'Liên kết xác thực không hợp lệ',
+        error: 'Liên kết xác thực không hợp lệ'
       })
     }
 
@@ -206,7 +207,7 @@ exports.verifyEmail = async (req, res) => {
     if (user.verificationExpires < Date.now()) {
       return res.status(400).json({
         success: false,
-        error: 'Liên kết xác thực đã hết hạn',
+        error: 'Liên kết xác thực đã hết hạn'
       })
     }
 
@@ -216,12 +217,12 @@ exports.verifyEmail = async (req, res) => {
       isVerified: true,
       verificationToken: '',
       verificationExpires: 0,
-      updateAt: new Date().toISOString(),
+      updateAt: new Date().toISOString()
     })
 
     res.status(200).json({
       success: true,
-      message: 'Email đã được xác thực thành công',
+      message: 'Email đã được xác thực thành công'
     })
   } catch (error) {
     handleError(error, req, res)
@@ -235,13 +236,13 @@ exports.resendVerificationEmail = async (req, res) => {
   try {
     // Find user by email
     const users = await User.scan({
-      email: { eq: email },
+      email: { eq: email }
     }).exec()
 
     if (!users || users.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Không tìm thấy người dùng với email này',
+        error: 'Không tìm thấy người dùng với email này'
       })
     }
 
@@ -251,7 +252,7 @@ exports.resendVerificationEmail = async (req, res) => {
     if (user.isVerified) {
       return res.status(400).json({
         success: false,
-        error: 'Email đã được xác thực trước đó',
+        error: 'Email đã được xác thực trước đó'
       })
     }
 
@@ -264,7 +265,7 @@ exports.resendVerificationEmail = async (req, res) => {
       id: user.id,
       verificationToken,
       verificationExpires,
-      updateAt: new Date().toISOString(),
+      updateAt: new Date().toISOString()
     })
 
     // Send verification email
@@ -273,13 +274,13 @@ exports.resendVerificationEmail = async (req, res) => {
     } catch (emailError) {
       return res.status(500).json({
         success: false,
-        error: 'Lỗi khi gửi email xác thực. Vui lòng thử lại sau.',
+        error: 'Lỗi khi gửi email xác thực. Vui lòng thử lại sau.'
       })
     }
 
     res.status(200).json({
       success: true,
-      message: 'Liên kết xác thực mới đã được gửi đến email của bạn',
+      message: 'Liên kết xác thực mới đã được gửi đến email của bạn'
     })
   } catch (error) {
     handleError(error, req, res)
