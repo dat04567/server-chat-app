@@ -219,21 +219,15 @@ exports.getConversationById = async (req, res) => {
  */
 exports.getConversationsForUser = async (req, res) => {
   try {
-    // Lấy userId từ middleware authentication thay vì từ params
     const userId = req.user.id;
     const { limit = 20, lastEvaluatedKey } = req.query;
+    const parsedLimit = parseInt(limit);
 
-    // Bước 1: Lấy các cuộc trò chuyện mà người dùng tham gia
-    // Sử dụng truy vấn cơ bản không cần chỉ định index phức tạp
-    const query = ConversationParticipants.query("userId").eq(userId);
-
-    // Sắp xếp theo lastMessageAt (sắp xếp client-side)
-    query.sort("descending");
-
-    // Áp dụng phân trang
-    if (limit) {
-      query.limit(parseInt(limit));
-    }
+    // 1. Lấy cuộc trò chuyện người dùng tham gia
+    const query = ConversationParticipants.query("userId")
+      .eq(userId)
+      .sort("lastMessageAt", "descending")
+      .limit(parsedLimit);
 
     if (lastEvaluatedKey) {
       query.startAt(JSON.parse(lastEvaluatedKey));
@@ -241,12 +235,7 @@ exports.getConversationsForUser = async (req, res) => {
 
     const userConversations = await query.exec();
 
-    // Sắp xếp lại theo lastMessageAt sau khi lấy dữ liệu
-    userConversations.sort((a, b) => {
-      // Sắp xếp giảm dần (mới nhất trước)
-      return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
-    });
-
+    // Trả về sớm nếu không có cuộc trò chuyện nào
     if (userConversations.length === 0) {
       return res.status(200).json({
         conversations: [],
@@ -254,115 +243,143 @@ exports.getConversationsForUser = async (req, res) => {
       });
     }
 
-    // Bước 2: Lấy thông tin chi tiết về các cuộc trò chuyện
+    // 2. Lấy thông tin conversation và participants trong cùng một lúc
     const conversationIds = userConversations.map(item => item.conversationId);
-    const conversations = await Conversation.batchGet(conversationIds);
 
-    // Tạo map tra cứu cho conversations
-    const conversationMap = {};
-    conversations.forEach(conv => {
-      conversationMap[conv.conversationId] = conv;
-    });
 
-    // Bước 3: Lấy tất cả người tham gia cho mỗi cuộc trò chuyện
-    const participantsPromises = conversationIds.map(convId =>
-      ConversationParticipants.query("conversationId")
-        .eq(convId)
-        .using("conversationIdIndex")
-        .exec()
-    );
+    const [conversations, allParticipantsResults] = await Promise.all([
+      Conversation.batchGet(conversationIds),
+      Promise.all(
+        conversationIds.map(convId =>
+          ConversationParticipants.query("conversationId")
+            .eq(convId)
+            .using("conversationIdIndex")
+            .exec()
+        )
+      )
+    ]);
 
-    const allParticipantsResults = await Promise.all(participantsPromises);
+    // 3. Tạo các bản đồ tra cứu hiệu quả
+    const conversationMap = conversations.reduce((map, conv) => {
+      map[conv.conversationId] = conv;
+      return map;
+    }, {});
 
-    // Bước 4: Thu thập tất cả userIds độc nhất
-    const uniqueUserIds = new Set();
-    allParticipantsResults.forEach(participants => {
-      participants.forEach(p => uniqueUserIds.add(p.userId));
-    });
 
-    // Bước 5: Lấy thông tin profile của tất cả người dùng trong một lần truy vấn
-    const userProfiles = await User.batchGet([...uniqueUserIds]);
-
-    // Tạo map tra cứu cho userProfiles
-    const userProfileMap = {};
-    userProfiles.forEach(user => {
-      userProfileMap[user.id] = user;
-    });
-
-    // Bước 6: Tạo map tra cứu cho participants theo conversationId
     const participantsMap = {};
+    const uniqueUserIds = new Set();
+
+    // 4. Xử lý dữ liệu người tham gia và thu thập IDs người dùng cần thiết
     allParticipantsResults.forEach(participants => {
-      if (participants.length > 0) {
-        const convId = participants[0].conversationId;
-        participantsMap[convId] = participants;
+      if (participants.length === 0) return;
+
+      const convId = participants[0].conversationId;
+      const conversation = conversationMap[convId];
+      if (!conversation) return;
+
+
+
+      participantsMap[convId] = participants;
+
+      // Thu thập IDs dựa trên loại cuộc trò chuyện
+      if (conversation.type === 'ONE-TO-ONE') {
+        const partner = participants.find(p => p.userId !== userId);
+        if (partner) uniqueUserIds.add(partner.userId);
+      } else if (conversation.type === 'GROUP') {
+        participants.forEach(p => uniqueUserIds.add(p.userId));
       }
     });
 
-    // Bước 7: Tạo kết quả cuối cùng
-    const result = userConversations.map(participation => {
-      const conversation = conversationMap[participation.conversationId];
-      if (!conversation) return null;
 
-      const participants = participantsMap[participation.conversationId] || [];
-      const participantsWithProfiles = participants.map(p => {
-        const user = userProfileMap[p.userId];
-        return {
-          userId: p.userId,
-          profile: user?.profile || null,
-          username: user?.username || null,
-          joinedAt: p.joinedAt,
-          isAdmin: p.isAdmin,
-          lastReadAt: p.lastReadAt,
-          isMuted: p.isMuted,
-          isArchived: p.isArchived
-        };
-      });
+    // 5. Lấy thông tin người dùng cần thiết trong một lần gọi
+    const userProfiles = await User.batchGet([...uniqueUserIds], {
+      ProjectionExpression: "id, username, profile"
+    });
 
-      // Xác định đối tác cho cuộc trò chuyện ONE-TO-ONE
-      let partner = null;
-      if (conversation.type === 'ONE-TO-ONE') {
-        const partnerParticipant = participants.find(p => p.userId !== userId);
-        if (partnerParticipant) {
-          const partnerUser = userProfileMap[partnerParticipant.userId];
-          if (partnerUser) {
-            partner = {
-              userId: partnerUser.id,
-              username: partnerUser.username,
-              profile: partnerUser.profile,
-              status: partnerUser.status,
-              lastSeen: partnerUser.lastSeen
-            };
-          }
+    const userProfileMap = userProfiles.reduce((map, user) => {
+      map[user.id] = user;
+      return map;
+    }, {});
+
+    // 6. Biến đổi dữ liệu để trả về kết quả
+    const conversations_result = userConversations
+      .map(participation => {
+        const conversation = conversationMap[participation.conversationId];
+        if (!conversation) return null;
+
+        const participants = participantsMap[participation.conversationId] || [];
+        const currentUserParticipation = participants.find(p => p.userId === userId);
+
+        // Tạo đối tượng dựa trên loại cuộc trò chuyện
+        if (conversation.type === 'ONE-TO-ONE') {
+          const partnerParticipant = participants.find(p => p.userId !== userId);
+          const partner = partnerParticipant && userProfileMap[partnerParticipant.userId];
+          if (!partner) return null;
+
+          return {
+            conversationId: conversation.conversationId,
+            type: 'ONE-TO-ONE',
+            lastMessageText: conversation.lastMessageText || "",
+            lastMessageAt: conversation.lastMessageAt || participation.lastMessageAt,
+            partner: {
+              userId: partner.id,
+              username: partner.username,
+              profile: partner.profile,
+              status: partner.status,
+              lastSeen: partner.lastSeen
+            },
+            participantInfo: {
+              joinedAt: participation.joinedAt,
+              lastReadAt: participation.lastReadAt,
+              isMuted: participation.isMuted || false,
+              isArchived: participation.isArchived || false
+            }
+          };
         }
-      }
+        else if (conversation.type === 'GROUP') {
+          // Map thông tin người dùng cho mỗi thành viên nhóm
+          const participantsWithProfiles = participants
+            .map(p => {
+              const user = userProfileMap[p.userId];
+              if (!user) return null;
 
-      return {
-        conversationId: conversation.conversationId,
-        type: conversation.type,
-        lastMessageText: conversation.lastMessageText || "",
-        lastMessageAt: conversation.lastMessageAt || participation.lastMessageAt,
-        // Thông tin riêng theo loại cuộc trò chuyện
-        ...(conversation.type === 'ONE-TO-ONE' && { partner }),
-        ...(conversation.type === 'GROUP' && {
-          groupName: conversation.groupName,
-          groupImage: conversation.groupImage,
-          creatorId: conversation.creatorId
-        }),
-        // Thông tin tham gia của người dùng hiện tại
-        participantInfo: {
-          joinedAt: participation.joinedAt,
-          isAdmin: participation.isAdmin,
-          lastReadAt: participation.lastReadAt,
-          isMuted: participation.isMuted,
-          isArchived: participation.isArchived
-        },
-        // Danh sách tất cả người tham gia
-        participants: participantsWithProfiles,
-      };
-    }).filter(Boolean); // Loại bỏ các giá trị null
+              return {
+                userId: p.userId,
+                profile: user.profile || null,
+                username: user.username || null,
+                joinedAt: p.joinedAt,
+                isAdmin: p.isAdmin || false,
+                lastReadAt: p.lastReadAt,
+                isMuted: p.isMuted || false,
+                isArchived: p.isArchived || false
+              };;
+            })
+            .filter(Boolean);
+
+          return {
+            conversationId: conversation.conversationId,
+            type: 'GROUP',
+            lastMessageText: conversation.lastMessageText || "",
+            lastMessageAt: conversation.lastMessageAt || participation.lastMessageAt,
+            groupName: conversation.groupName,
+            groupImage: conversation.groupImage,
+            creatorId: conversation.creatorId,
+            participantInfo: {
+              joinedAt: currentUserParticipation?.joinedAt,
+              isAdmin: currentUserParticipation?.isAdmin || false,
+              lastReadAt: currentUserParticipation?.lastReadAt,
+              isMuted: currentUserParticipation?.isMuted || false,
+              isArchived: currentUserParticipation?.isArchived || false
+            },
+            participants: participantsWithProfiles,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
 
     res.status(200).json({
-      conversations: result,
+      conversations: conversations_result,
       lastEvaluatedKey: userConversations.lastEvaluatedKey
     });
   } catch (error) {

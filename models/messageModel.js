@@ -11,7 +11,10 @@ const messageSchema = new dynamoose.Schema({
   messageId: {
     type: String,
     rangeKey: true, // Sort key
-    default: () => uuidv1(), // Automatically generate a UUID v1
+    default: () => {
+      const timestamp = new Date().getTime();
+      return `${timestamp}_${uuidv1()}`;
+    }, // Automatically generate a UUID v1
   },
   createdAt: {
     type: String,
