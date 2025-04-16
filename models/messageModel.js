@@ -1,5 +1,5 @@
-const dynamoose = require('../config/database')
-const { v1: uuidv1 } = require('uuid') // Import UUID v1 for unique and time-ordered IDs
+const dynamoose = require('../config/database');
+const { v1: uuidv1 } = require('uuid'); // Import UUID v1 for unique and time-ordered IDs
 
 const messageSchema = new dynamoose.Schema({
   // Partition Key
@@ -45,7 +45,7 @@ const messageSchema = new dynamoose.Schema({
   forwardedFromMessageId: {
     type: String, // Optional field for forwarded messages
   },
-})
+});
 
-const Message = dynamoose.model('messages', messageSchema)
-module.exports = Message
+const Message = dynamoose.model('Messages', messageSchema);
+module.exports = Message;

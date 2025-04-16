@@ -1,18 +1,32 @@
-const dynamoose = require('../config/database')
+const dynamoose = require('../config/database');
 
 const conversationParticipantsSchema = new dynamoose.Schema(
   {
     userId: {
       type: String,
       hashKey: true, // Partition key
+      required: true,
+      index: {
+        name: 'userIdIndex',
+        global: true,
+      },
     },
     conversationId: {
       type: String,
       rangeKey: true, // Sort key
+      required: true,
+      index: {
+        name: 'conversationIdIndex',
+        global: true,
+      },
     },
     lastMessageAt: {
       type: String, // Timestamp of the last message in the conversation
       required: true,
+      index: {
+        name: 'lastMessageAtIndex',
+        global: true,
+      }
     },
     joinedAt: {
       type: String,
@@ -32,23 +46,13 @@ const conversationParticipantsSchema = new dynamoose.Schema(
       type: Boolean,
       default: false, // Default to false
     },
-  },
-  {
-    // for querying all participants in a conversation
-    indexes: [
-      {
-        name: 'conversationIdIndex',
-        global: true,
-        hashKey: 'conversationId', // Partition key for the GSI
-        rangeKey: 'userId', // Sort key for the GSI
-      },
-    ],
   }
-)
+);
+
 
 const ConversationParticipants = dynamoose.model(
-  'conversationParticipants',
+  'ConversationParticipants',
   conversationParticipantsSchema
-)
+);
 
-module.exports = ConversationParticipants
+module.exports = ConversationParticipants;

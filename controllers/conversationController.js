@@ -1,19 +1,20 @@
 const Conversation = require('../models/conversationModel');
 const ConversationParticipants = require('../models/conversationParticipantsModel');
 const Message = require('../models/messageModel');
-
+const User = require('../models/userModel');
 /**
  * Create a ONE-TO-ONE conversation
  */
 exports.createOneToOneConversation = async (req, res) => {
   try {
-    const { senderId, recipientId, content } = req.body;
+    // Lấy senderId từ req.user thay vì từ body
+    const senderId = req.user.id;
+    const { recipientId, content } = req.body;
 
     // Validate input
-    if (!senderId || !recipientId || !content) {
+    if (!recipientId || !content) {
       return res.status(400).json({
-        error:
-          'senderId, recipientId, and initial message content are required to create a conversation',
+        error: 'recipientId và content là bắt buộc để tạo cuộc trò chuyện'
       });
     }
 
@@ -25,10 +26,6 @@ exports.createOneToOneConversation = async (req, res) => {
     const existingConversation = await Conversation.query('participantPairKey')
       .eq(participantPairKey)
       .exec();
-
-    console.log(existingConversation);
-
-
 
     let savedConversation, savedMessage;
 
@@ -122,19 +119,21 @@ exports.createOneToOneConversation = async (req, res) => {
  */
 exports.createGroupConversation = async (req, res) => {
   try {
-    const { creatorId, groupName, groupImage, participantIds } = req.body;
+    // Lấy creatorId từ user đã xác thực
+    const creatorId = req.user.id;
+    const { groupName, groupImage, participantIds } = req.body;
 
     // Validate input
-    if (!creatorId || !participantIds || !Array.isArray(participantIds)) {
+    if (!participantIds || !Array.isArray(participantIds)) {
       return res
         .status(400)
-        .json({ error: 'creatorId and participantIds array are required for GROUP conversations' });
+        .json({ error: 'Mảng participantIds là bắt buộc đối với cuộc trò chuyện nhóm' });
     }
 
     // Create the conversation
     const newConversation = new Conversation({
       type: 'GROUP',
-      groupName: groupName || 'Unnamed Group',
+      groupName: groupName || 'Nhóm không có tên',
       groupImage: groupImage || 'default-group-image.png',
       creatorId,
     });
@@ -144,25 +143,16 @@ exports.createGroupConversation = async (req, res) => {
     // Create timestamp for consistency
     const timestamp = new Date().toISOString();
 
+    // Đảm bảo creatorId luôn có trong danh sách thành viên
+    const allParticipantIds = Array.from(new Set([creatorId, ...participantIds]));
+
     // Add all participants (including creator) to the ConversationParticipants table
-    const participants = [
-      // Creator with admin privileges
-      {
-        userId: creatorId,
-        conversationId: savedConversation.conversationId,
-        isAdmin: true,
-        lastMessageAt: timestamp,
-      },
-      // Other participants without admin privileges
-      ...participantIds
-        .filter(id => id !== creatorId) // Exclude creator to avoid duplication
-        .map(userId => ({
-          userId,
-          conversationId: savedConversation.conversationId,
-          isAdmin: false,
-          lastMessageAt: timestamp,
-        }))
-    ];
+    const participants = allParticipantIds.map(userId => ({
+      userId,
+      conversationId: savedConversation.conversationId,
+      isAdmin: userId === creatorId, // Chỉ người tạo là admin
+      lastMessageAt: timestamp,
+    }));
 
     await Promise.all(
       participants.map((participant) =>
@@ -229,86 +219,173 @@ exports.getConversationById = async (req, res) => {
  */
 exports.getConversationsForUser = async (req, res) => {
   try {
-    const { userId } = req.params;
-    const { limit, lastEvaluatedKey } = req.query;
+    // Lấy userId từ middleware authentication thay vì từ params
+    const userId = req.user.id;
+    const { limit = 20, lastEvaluatedKey } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
+    // Bước 1: Lấy các cuộc trò chuyện mà người dùng tham gia
+    // Sử dụng truy vấn cơ bản không cần chỉ định index phức tạp
+    const query = ConversationParticipants.query("userId").eq(userId);
+
+    // Sắp xếp theo lastMessageAt (sắp xếp client-side)
+    query.sort("descending");
+
+    // Áp dụng phân trang
+    if (limit) {
+      query.limit(parseInt(limit));
     }
 
-    const pageSize = parseInt(limit, 10) || 10;
+    if (lastEvaluatedKey) {
+      query.startAt(JSON.parse(lastEvaluatedKey));
+    }
 
-    // Step 1: Fetch all conversationParticipants for the user
-    let participantRecords = [];
-    let lastKey;
+    const userConversations = await query.exec();
 
-    do {
-      const result = await ConversationParticipants.query('userId')
-        .eq(userId)
-        .startAt(lastKey)
-        .exec();
+    // Sắp xếp lại theo lastMessageAt sau khi lấy dữ liệu
+    userConversations.sort((a, b) => {
+      // Sắp xếp giảm dần (mới nhất trước)
+      return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
+    });
 
-      participantRecords = participantRecords.concat(result);
-      lastKey = result.lastKey;
-    } while (lastKey);
-
-    if (participantRecords.length === 0) {
+    if (userConversations.length === 0) {
       return res.status(200).json({
         conversations: [],
-        lastEvaluatedKey: null,
+        lastEvaluatedKey: null
       });
     }
 
-    // Step 2: Extract conversationIds
-    const conversationIds = participantRecords.map(
-      (record) => record.conversationId
+    // Bước 2: Lấy thông tin chi tiết về các cuộc trò chuyện
+    const conversationIds = userConversations.map(item => item.conversationId);
+    const conversations = await Conversation.batchGet(conversationIds);
+
+    // Tạo map tra cứu cho conversations
+    const conversationMap = {};
+    conversations.forEach(conv => {
+      conversationMap[conv.conversationId] = conv;
+    });
+
+    // Bước 3: Lấy tất cả người tham gia cho mỗi cuộc trò chuyện
+    const participantsPromises = conversationIds.map(convId =>
+      ConversationParticipants.query("conversationId")
+        .eq(convId)
+        .using("conversationIdIndex")
+        .exec()
     );
 
-    // Step 3: Fetch conversations from the conversations table
-    const conversationPromises = conversationIds.map((conversationId) =>
-      Conversation.get(conversationId)
-    );
-    const conversations = await Promise.all(conversationPromises);
+    const allParticipantsResults = await Promise.all(participantsPromises);
 
-    // Step 4: Sort conversations by lastMessageAt in descending order
-    const sortedConversations = conversations
-      .filter((conversation) => conversation) // Filter out null results (if any)
-      .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+    // Bước 4: Thu thập tất cả userIds độc nhất
+    const uniqueUserIds = new Set();
+    allParticipantsResults.forEach(participants => {
+      participants.forEach(p => uniqueUserIds.add(p.userId));
+    });
 
-    // Step 5: Apply pagination at the application level
-    const startIndex = lastEvaluatedKey ? parseInt(lastEvaluatedKey, 10) : 0;
-    const paginatedConversations = sortedConversations.slice(
-      startIndex,
-      startIndex + pageSize
-    );
+    // Bước 5: Lấy thông tin profile của tất cả người dùng trong một lần truy vấn
+    const userProfiles = await User.batchGet([...uniqueUserIds]);
 
-    // Step 6: Generate the next page token
-    const nextPageToken =
-      startIndex + pageSize < sortedConversations.length
-        ? (startIndex + pageSize).toString()
-        : null;
+    // Tạo map tra cứu cho userProfiles
+    const userProfileMap = {};
+    userProfiles.forEach(user => {
+      userProfileMap[user.id] = user;
+    });
 
-    // Step 7: Return the results
+    // Bước 6: Tạo map tra cứu cho participants theo conversationId
+    const participantsMap = {};
+    allParticipantsResults.forEach(participants => {
+      if (participants.length > 0) {
+        const convId = participants[0].conversationId;
+        participantsMap[convId] = participants;
+      }
+    });
+
+    // Bước 7: Tạo kết quả cuối cùng
+    const result = userConversations.map(participation => {
+      const conversation = conversationMap[participation.conversationId];
+      if (!conversation) return null;
+
+      const participants = participantsMap[participation.conversationId] || [];
+      const participantsWithProfiles = participants.map(p => {
+        const user = userProfileMap[p.userId];
+        return {
+          userId: p.userId,
+          profile: user?.profile || null,
+          username: user?.username || null,
+          joinedAt: p.joinedAt,
+          isAdmin: p.isAdmin,
+          lastReadAt: p.lastReadAt,
+          isMuted: p.isMuted,
+          isArchived: p.isArchived
+        };
+      });
+
+      // Xác định đối tác cho cuộc trò chuyện ONE-TO-ONE
+      let partner = null;
+      if (conversation.type === 'ONE-TO-ONE') {
+        const partnerParticipant = participants.find(p => p.userId !== userId);
+        if (partnerParticipant) {
+          const partnerUser = userProfileMap[partnerParticipant.userId];
+          if (partnerUser) {
+            partner = {
+              userId: partnerUser.id,
+              username: partnerUser.username,
+              profile: partnerUser.profile,
+              status: partnerUser.status,
+              lastSeen: partnerUser.lastSeen
+            };
+          }
+        }
+      }
+
+      return {
+        conversationId: conversation.conversationId,
+        type: conversation.type,
+        lastMessageText: conversation.lastMessageText || "",
+        lastMessageAt: conversation.lastMessageAt || participation.lastMessageAt,
+        // Thông tin riêng theo loại cuộc trò chuyện
+        ...(conversation.type === 'ONE-TO-ONE' && { partner }),
+        ...(conversation.type === 'GROUP' && {
+          groupName: conversation.groupName,
+          groupImage: conversation.groupImage,
+          creatorId: conversation.creatorId
+        }),
+        // Thông tin tham gia của người dùng hiện tại
+        participantInfo: {
+          joinedAt: participation.joinedAt,
+          isAdmin: participation.isAdmin,
+          lastReadAt: participation.lastReadAt,
+          isMuted: participation.isMuted,
+          isArchived: participation.isArchived
+        },
+        // Danh sách tất cả người tham gia
+        participants: participantsWithProfiles,
+      };
+    }).filter(Boolean); // Loại bỏ các giá trị null
+
     res.status(200).json({
-      conversations: paginatedConversations,
-      lastEvaluatedKey: nextPageToken,
+      conversations: result,
+      lastEvaluatedKey: userConversations.lastEvaluatedKey
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error getting conversations for user:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve conversations',
+      message: error.message
+    });
   }
 };
-
 /**
  * Send a message to a conversation
  */
 exports.sendMessage = async (req, res) => {
   try {
-    const { conversationId, senderId, content, type = 'TEXT' } = req.body;
+    const { conversationId } = req.params;
+    const { content, type = 'TEXT' } = req.body;
+    const senderId = req.user.id; // Lấy senderId từ middleware xác thực
 
     // Validate input
-    if (!conversationId || !senderId || !content) {
+    if (!conversationId || !content) {
       return res.status(400).json({
-        error: 'conversationId, senderId, and content are required'
+        error: 'conversationId và content là bắt buộc'
       });
     }
 
@@ -320,7 +397,7 @@ exports.sendMessage = async (req, res) => {
 
     if (!isParticipant) {
       return res.status(403).json({
-        error: 'User is not a participant in this conversation'
+        error: 'Người dùng không phải là thành viên của cuộc trò chuyện này'
       });
     }
 

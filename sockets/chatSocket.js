@@ -1,45 +1,68 @@
 // filepath: /Users/mac/Documents/CNM/server/utils/socket.js
-const User = require('../models/userModel')
-const Conversation = require('../models/conversationModel')
-const ConversationParticipants = require('../models/conversationParticipantsModel')
-const Message = require('../models/messageModel')
+const User = require('../models/userModel');
+const Conversation = require('../models/conversationModel');
+const ConversationParticipants = require('../models/conversationParticipantsModel');
+const Message = require('../models/messageModel');
+const jwt = require('jsonwebtoken');
 
 // Đối tượng để lưu trữ kết nối socket của mỗi user
 // Thay đổi thành object chứa mảng socketIds cho mỗi userId
-const userSockets = {}
+const userSockets = {};
 
 module.exports = (io) => {
-  // Middleware xác thực (nếu cần)
+  // Middleware xác thực sử dụng JWT token
   io.use((socket, next) => {
-    const userId = socket.handshake.auth.userId
-    if (!userId) {
-      return next(new Error('Không được xác thực'))
-    }
+    try {
 
-    socket.userId = userId
-    next()
-  })
+      const cookieObject = socket.handshake.headers['cookie']
+        ? socket.handshake.headers['cookie'].split(';').reduce((acc, cookie) => {
+          const [key, value] = cookie.split('=');
+          acc[key.trim()] = decodeURIComponent(value);
+          return acc;
+        }, {})
+        : {};
+      const token = cookieObject['token'] || cookieObject['access_token'] || null;
+
+
+      if (!token) {
+        return next(new Error('Không được xác thực - Token không tồn tại'));
+      }
+
+
+      // Giải mã token để lấy thông tin người dùng
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+
+      // Gắn userId vào đối tượng socket
+      socket.userId = decoded.id;
+      next();
+    } catch (error) {
+      return next(new Error('Không được xác thực - Token không hợp lệ'));
+    }
+  });
 
   io.on('connection', (socket) => {
-    const userId = socket.userId
-    console.log(`User connected: ${userId}`)
+    const userId = socket.userId;
+    console.log(`User connected: ${userId}`);
 
     // Lưu trữ kết nối socket của người dùng (hỗ trợ nhiều thiết bị)
     if (!userSockets[userId]) {
-      userSockets[userId] = []
+      userSockets[userId] = [];
     }
-    userSockets[userId].push(socket.id)
+    userSockets[userId].push(socket.id);
 
     // Cập nhật trạng thái người dùng thành trực tuyến
-    updateUserStatus(userId, 'ONLINE')
+    updateUserStatus(userId, 'ONLINE');
 
     // Tham gia vào các phòng cho các cuộc trò chuyện hiện có
-    joinUserConversations(socket, userId)
+    joinUserConversations(socket, userId);
 
     // Sự kiện bắt đầu cuộc trò chuyện mới
     socket.on('start_conversation', async (data) => {
       try {
-        const { recipientId, content, type } = data
+        const { recipientId, content, type } = data;
+
+        console.log(type);
 
         // Xử lý cuộc trò chuyện một-một
         if (type === 'ONE-TO-ONE') {
@@ -47,67 +70,69 @@ module.exports = (io) => {
             userId,
             recipientId,
             content
-          )
+          );
+
 
           // Thông báo cho người khởi tạo
-          socket.emit('conversation_started', conversationData)
+          socket.emit('conversation_started', conversationData);
 
-          // Thông báo cho người nhận nếu họ đang trực tuyến
-          const recipientSocketIds = userSockets[recipientId] || []
+          // // Thông báo cho người nhận nếu họ đang trực tuyến
+          const recipientSocketIds = userSockets[recipientId] || [];
           recipientSocketIds.forEach((socketId) => {
-            io.to(socketId).emit('new_conversation', conversationData)
-          })
+            io.to(socketId).emit('new_conversation', conversationData);
+          });
 
-          // Thêm cả hai người dùng vào phòng cuộc trò chuyện
-          socket.join(conversationData.conversation.conversationId)
+          // // Thêm cả hai người dùng vào phòng cuộc trò chuyện
+          socket.join(conversationData.conversation.conversationId);
           recipientSocketIds.forEach((socketId) => {
             io.sockets.sockets
               .get(socketId)
-              ?.join(conversationData.conversation.conversationId)
-          })
+              ?.join(conversationData.conversation.conversationId);
+          });
         }
+
         // Xử lý cuộc trò chuyện nhóm
-        else if (type === 'GROUP') {
-          const { groupName, participantIds } = data
-          const conversationData = await createGroupConversation(
-            userId,
-            groupName,
-            participantIds
-          )
+        // else if (type === 'GROUP') {
+        //   const { groupName, participantIds } = data;
+        //   const conversationData = await createGroupConversation(
+        //     userId,
+        //     groupName,
+        //     participantIds
+        //   );
 
-          // Thông báo cho người khởi tạo
-          socket.emit('conversation_started', conversationData)
+        //   // Thông báo cho người khởi tạo
+        //   socket.emit('conversation_started', conversationData);
 
-          // Thông báo cho các thành viên và thêm họ vào phòng
-          for (const participantId of participantIds) {
-            const participantSocketIds = userSockets[participantId] || []
-            participantSocketIds.forEach((socketId) => {
-              io.to(socketId).emit('new_conversation', conversationData)
-              io.sockets.sockets
-                .get(socketId)
-                ?.join(conversationData.conversationId)
-            })
-          }
+        //   // Thông báo cho các thành viên và thêm họ vào phòng
+        //   for (const participantId of participantIds) {
+        //     const participantSocketIds = userSockets[participantId] || [];
+        //     participantSocketIds.forEach((socketId) => {
+        //       io.to(socketId).emit('new_conversation', conversationData);
+        //       io.sockets.sockets
+        //         .get(socketId)
+        //         ?.join(conversationData.conversationId);
+        //     });
+        //   }
 
-          // Thêm người khởi tạo vào phòng
-          socket.join(conversationData.conversationId)
-        }
+        //   // Thêm người khởi tạo vào phòng
+        //   socket.join(conversationData.conversationId);
+        // }
       } catch (error) {
-        socket.emit('error', { message: error.message })
+        socket.emit('error', { message: error.message });
       }
-    })
+    });
 
     // Sự kiện gửi tin nhắn
     socket.on('send_message', async (data) => {
       try {
-        const { conversationId, content, type = 'TEXT' } = data
+        const { conversationId, content, type = 'TEXT' } = data;
 
         // Kiểm tra xem người dùng có trong cuộc trò chuyện không
-        const isParticipant = await isUserInConversation(userId, conversationId)
+        const isParticipant = await isUserInConversation(userId, conversationId);
         if (!isParticipant) {
           return socket.emit('error', {
             message: 'Không có quyền gửi tin nhắn vào cuộc trò chuyện này',
-          })
+          });
         }
 
         // Tạo tin nhắn mới
@@ -116,51 +141,51 @@ module.exports = (io) => {
           userId,
           content,
           type
-        )
+        );
 
         // Cập nhật thông tin cuộc trò chuyện
-        await updateConversationLastMessage(conversationId, content)
+        await updateConversationLastMessage(conversationId, content);
 
         // Gửi tin nhắn đến tất cả người tham gia trong phòng
-        io.to(conversationId).emit('new_message', newMessage)
+        io.to(conversationId).emit('new_message', newMessage);
       } catch (error) {
-        socket.emit('error', { message: error.message })
+        socket.emit('error', { message: error.message });
       }
-    })
+    });
 
     // Sự kiện người dùng đang gõ
     socket.on('typing', (data) => {
-      const { conversationId } = data
-      socket.to(conversationId).emit('user_typing', { userId, conversationId })
-    })
+      const { conversationId } = data;
+      socket.to(conversationId).emit('user_typing', { userId, conversationId });
+    });
 
     // Sự kiện người dùng dừng gõ
     socket.on('stop_typing', (data) => {
-      const { conversationId } = data
+      const { conversationId } = data;
       socket
         .to(conversationId)
-        .emit('user_stop_typing', { userId, conversationId })
-    })
+        .emit('user_stop_typing', { userId, conversationId });
+    });
 
     // Sự kiện ngắt kết nối
     socket.on('disconnect', () => {
-      console.log(`User disconnected: ${userId}`)
+      console.log(`User disconnected: ${userId}`);
 
       // Cập nhật trạng thái người dùng thành ngoại tuyến
       // Chỉ cập nhật nếu không còn thiết bị nào khác đang kết nối
-      if (userSockets[userId]) {
-        userSockets[userId] = userSockets[userId].filter(
-          (id) => id !== socket.id
-        )
+      // if (userSockets[userId]) {
+      //   userSockets[userId] = userSockets[userId].filter(
+      //     (id) => id !== socket.id
+      //   );
 
-        if (userSockets[userId].length === 0) {
-          // Chỉ cập nhật trạng thái ngoại tuyến khi không còn thiết bị nào kết nối
-          updateUserStatus(userId, 'OFFLINE')
-          delete userSockets[userId]
-        }
-      }
-    })
-  })
+      //   if (userSockets[userId].length === 0) {
+      //     // Chỉ cập nhật trạng thái ngoại tuyến khi không còn thiết bị nào kết nối
+      //     updateUserStatus(userId, 'OFFLINE');
+      //     delete userSockets[userId];
+      //   }
+      // }
+    });
+  });
 
   // Hàm hỗ trợ
   async function updateUserStatus(userId, status) {
@@ -171,9 +196,9 @@ module.exports = (io) => {
           status,
           lastSeen: new Date().toISOString(),
         }
-      )
+      );
     } catch (error) {
-      console.error('Error updating user status:', error)
+      console.error('Error updating user status:', error);
     }
   }
 
@@ -182,14 +207,14 @@ module.exports = (io) => {
       // Lấy tất cả các cuộc trò chuyện của người dùng
       const userConversations = await ConversationParticipants.query('userId')
         .eq(userId)
-        .exec()
+        .exec();
 
       // Tham gia vào tất cả các phòng cuộc trò chuyện
       for (const conv of userConversations) {
-        socket.join(conv.conversationId)
+        socket.join(conv.conversationId);
       }
     } catch (error) {
-      console.error('Error joining user conversations:', error)
+      console.error('Error joining user conversations:', error);
     }
   }
 
@@ -198,84 +223,110 @@ module.exports = (io) => {
     recipientId,
     initialContent
   ) {
+
+    // Kiểm tra nếu người gửi và người nhận là cùng một người
+    const isSelfConversation = senderId === recipientId;
+
     // Sắp xếp ID để tạo participantPairKey
-    const sortedIds = [senderId, recipientId].sort()
-    const participantPairKey = `${sortedIds[0]}#${sortedIds[1]}`
+    const sortedIds = [senderId, recipientId].sort();
+    const participantPairKey = `${sortedIds[0]}#${sortedIds[1]}`;
 
-    // Kiểm tra xem cuộc trò chuyện đã tồn tại chưa
-    const existingConversations = await Conversation.query('participantPairKey')
-      .eq(participantPairKey)
-      .exec()
+    try {
 
-    if (existingConversations.length > 0) {
-      const existingConversation = existingConversations[0]
 
-      // Tạo tin nhắn mới trong cuộc trò chuyện hiện có
-      const newMessage = await createMessage(
-        existingConversation.conversationId,
+      // Use the proper index name and query properly
+      const existingConversations = await Conversation.query('participantPairKey')
+        .eq(participantPairKey)
+        .exec();
+
+
+      if (existingConversations && existingConversations.length > 0) {
+        const existingConversation = existingConversations[0];
+
+
+
+        // Tạo tin nhắn mới trong cuộc trò chuyện hiện có
+        const newMessage = await createMessage(
+          existingConversation.conversationId,
+          senderId,
+          initialContent,
+          'TEXT',
+          recipientId
+        );
+
+        // Cập nhật thông tin cuộc trò chuyện
+        await updateConversationLastMessage(
+          existingConversation.conversationId,
+          initialContent
+        );
+
+        return {
+          conversationId: existingConversation.conversationId,
+        };
+      }
+
+      // Tạo cuộc trò chuyện mới
+      const timestamp = new Date().toISOString();
+      const newConversation = new Conversation({
+        type: 'ONE-TO-ONE',
+        participantPairKey,
+        lastMessageText: initialContent,
+        lastMessageAt: timestamp,
+      });
+
+      const savedConversation = await newConversation.save();
+
+
+      let participants = [];
+
+      if (isSelfConversation) {
+        // Nếu là tự nhắn tin với chính mình, chỉ tạo một bản ghi participant
+        participants = [
+          {
+            userId: senderId,
+            conversationId: savedConversation.conversationId,
+            lastMessageAt: timestamp,
+          }
+        ];
+      } else {
+        // Trường hợp bình thường với hai người dùng khác nhau
+        participants = [
+          {
+            userId: senderId,
+            conversationId: savedConversation.conversationId,
+            lastMessageAt: timestamp,
+          },
+          {
+            userId: recipientId,
+            conversationId: savedConversation.conversationId,
+            lastMessageAt: timestamp,
+          },
+        ];
+      }
+
+
+      await Promise.all(
+        participants.map((participant) =>
+          ConversationParticipants.create(participant)
+        )
+      );
+
+
+      // // Tạo tin nhắn đầu tiên
+      await createMessage(
+        savedConversation.conversationId,
         senderId,
         initialContent,
         'TEXT',
         recipientId
-      )
-
-      // Cập nhật thông tin cuộc trò chuyện
-      await updateConversationLastMessage(
-        existingConversation.conversationId,
-        initialContent
-      )
+      );
 
       return {
-        conversation: existingConversation,
-        message: newMessage,
-        isNew: false,
-      }
-    }
-
-    // Tạo cuộc trò chuyện mới
-    const timestamp = new Date().toISOString()
-    const newConversation = new Conversation({
-      type: 'ONE-TO-ONE',
-      participantPairKey,
-      lastMessageText: initialContent,
-      lastMessageAt: timestamp,
-    })
-
-    const savedConversation = await newConversation.save()
-
-    // Thêm người tham gia vào cuộc trò chuyện
-    const participants = [
-      {
-        userId: senderId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp,
-      },
-      {
-        userId: recipientId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp,
-      },
-    ]
-
-    await Promise.all(
-      participants.map((participant) =>
-        ConversationParticipants.create(participant)
-      )
-    )
-
-    // Tạo tin nhắn đầu tiên
-    const newMessage = await createMessage(
-      savedConversation.conversationId,
-      senderId,
-      initialContent,
-      'TEXT',
-      recipientId
-    )
-
-    return {
-      conversation: savedConversation,
-      message: newMessage,
-      isNew: true,
+        conversationId: savedConversation.conversationId
+      };
+    } catch (error) {
+      console.error("Error in createOrGetOneToOneConversation:", error);
+      throw error; // Re-throw to be handled by the caller
     }
   }
 
@@ -285,12 +336,12 @@ module.exports = (io) => {
       type: 'GROUP',
       groupName: groupName || 'Nhóm mới',
       creatorId,
-    })
+    });
 
-    const savedConversation = await newConversation.save()
+    const savedConversation = await newConversation.save();
 
     // Thêm tất cả người tham gia vào cuộc trò chuyện
-    const timestamp = new Date().toISOString()
+    const timestamp = new Date().toISOString();
     const participants = [
       // Thêm người tạo nhóm
       {
@@ -306,15 +357,15 @@ module.exports = (io) => {
         lastMessageAt: timestamp,
         isAdmin: false,
       })),
-    ]
+    ];
 
     await Promise.all(
       participants.map((participant) =>
         ConversationParticipants.create(participant)
       )
-    )
+    );
 
-    return savedConversation
+    return savedConversation;
   }
 
   async function createMessage(
@@ -330,13 +381,15 @@ module.exports = (io) => {
       recipientId,
       type,
       content,
-    })
+    });
 
-    return await newMessage.save()
+    return await newMessage.save();
   }
 
   async function updateConversationLastMessage(conversationId, content) {
-    const timestamp = new Date().toISOString()
+    const timestamp = new Date().toISOString();
+
+
 
     // Cập nhật thông tin cuộc trò chuyện
     await Conversation.update(
@@ -346,12 +399,17 @@ module.exports = (io) => {
         lastMessageAt: timestamp,
         updatedAt: timestamp,
       }
-    )
+    );
+
+
 
     // Cập nhật lastMessageAt cho tất cả người tham gia
     const participants = await ConversationParticipants.query('conversationId')
+      .using('conversationIdIndex')
       .eq(conversationId)
-      .exec()
+      .exec();
+
+
 
     await Promise.all(
       participants.map((participant) =>
@@ -365,7 +423,7 @@ module.exports = (io) => {
           }
         )
       )
-    )
+    );
   }
 
   async function isUserInConversation(userId, conversationId) {
@@ -373,11 +431,11 @@ module.exports = (io) => {
       const participant = await ConversationParticipants.get({
         userId,
         conversationId,
-      })
+      });
 
-      return Boolean(participant)
+      return Boolean(participant);
     } catch (error) {
-      return false
+      return false;
     }
   }
-}
+};

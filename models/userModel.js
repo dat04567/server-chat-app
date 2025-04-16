@@ -66,6 +66,10 @@ const userSchema = new dynamoose.Schema({
             type: String,
             default: ''
          },
+         avatar: {
+            type: String,
+            default: ''
+         },
       }
    },
    createAt: {
@@ -92,6 +96,6 @@ const userSchema = new dynamoose.Schema({
 
 
 // Khai báo User model từ schema
-const User = dynamoose.model('User', userSchema);
+const User = dynamoose.model('Users', userSchema);
 
 module.exports = User;

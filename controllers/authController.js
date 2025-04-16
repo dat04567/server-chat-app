@@ -151,6 +151,8 @@ exports.login = async (req, res) => {
          }
       });
    } catch (error) {
+      console.log(error);
+
       error.statusCode = 500;
       error.message = 'Lỗi đăng nhập. Vui lòng thử lại sau.';
       handleError(error, req, res);

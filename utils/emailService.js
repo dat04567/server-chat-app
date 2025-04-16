@@ -60,7 +60,6 @@ exports.sendVerificationEmail = async (email, token, userId) => {
    try {
       // Gửi email sử dụng Nodemailer
       const result = await transporter.sendMail(mailOptions);
-      console.log('Email sent:', result);
 
       return result;
    } catch (error) {

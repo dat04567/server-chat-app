@@ -58,5 +58,7 @@ const conversationSchema = new dynamoose.Schema({
   },
 });
 
+
+
 const Conversation = dynamoose.model('Conversations', conversationSchema);
 module.exports = Conversation;
