@@ -64,7 +64,6 @@ exports.register = async (req, res) => {
     }
 
     const user = await User.create(userData)
-    const user = await User.create(userData)
 
     // Send verification email
     try {
@@ -96,6 +95,7 @@ exports.register = async (req, res) => {
 // Đăng nhập
 exports.login = async (req, res) => {
   const { email, password } = req.body
+  console.log(`backend received ${email}-${password}`)
 
   try {
     // Tìm người dùng bằng email

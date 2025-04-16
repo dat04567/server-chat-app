@@ -115,16 +115,23 @@ exports.getMessagesForConversation = async (req, res) => {
       .limit(pageSize)
 
     if (lastMessageId) {
+      // console.log(`thisssss ${{ conversationId, lastMessageId }}`)
       query.startAt({ conversationId, messageId: lastMessageId }) // Reconstruct the lastEvaluatedKey
     }
 
     const messages = await query.exec()
-    console.log(messages)
+    // console.log(messages)
 
     res.status(200).json({
-      messages,
+      messages: messages.map((message) => ({
+        messageId: message.messageId,
+        createdAt: message.createdAt,
+        senderId: message.senderId,
+        type: message.type,
+        content: message.content
+      })),
       lastEvaluatedKey: messages.lastKey
-        ? { messageId: messages.lastKey.messageId } // Only return the messageId
+        ? { messageId: messages.lastKey.messageId }
         : null
     })
   } catch (error) {

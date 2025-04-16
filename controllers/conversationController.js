@@ -38,8 +38,6 @@ exports.createOneToOneConversation = async (req, res) => {
 
     console.log(existingConversation)
 
-    let savedConversation, savedMessage
-
     if (existingConversation.length > 0) {
       return res.status(200).json({
         message: 'Conversation already exists',
@@ -181,25 +179,50 @@ exports.getConversationsForUser = async (req, res) => {
     )
     const conversations = await Promise.all(conversationPromises)
 
-    // Step 4: Sort conversations by lastMessageAt in descending order
-    const sortedConversations = conversations
-      .filter((conversation) => conversation) // Filter out null results (if any)
-      .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt))
+    // Step 4: Construct the response
+    const responseConversations = await Promise.all(
+      conversations
+        .filter((conversation) => conversation) // Filter out null results (if any)
+        .map(async (conversation) => {
+          const recipientId = extractRecipientId(
+            conversation.participantPairKey,
+            userId
+          )
+          const recipient = await User.get(recipientId) // Query recipient's profile
 
-    // Step 5: Apply pagination at the application level
+          return {
+            conversationId: conversation.conversationId,
+            lastMessageAt: conversation.lastMessageAt,
+            lastMessageText: conversation.lastMessageText,
+            type: conversation.type,
+            isDeleted: conversation.isDeleted,
+            recipient: {
+              userId: recipient.id,
+              profile: recipient.profile
+            }
+          }
+        })
+    )
+
+    // Step 5: Sort conversations by lastMessageAt in descending order
+    responseConversations.sort(
+      (a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt)
+    )
+
+    // Step 6: Apply pagination at the application level
     const startIndex = lastEvaluatedKey ? parseInt(lastEvaluatedKey, 10) : 0
-    const paginatedConversations = sortedConversations.slice(
+    const paginatedConversations = responseConversations.slice(
       startIndex,
       startIndex + pageSize
     )
 
-    // Step 6: Generate the next page token
+    // Step 7: Generate the next page token
     const nextPageToken =
-      startIndex + pageSize < sortedConversations.length
+      startIndex + pageSize < responseConversations.length
         ? (startIndex + pageSize).toString()
         : null
 
-    // Step 7: Return the results
+    // Step 8: Return the results
     res.status(200).json({
       conversations: paginatedConversations,
       lastEvaluatedKey: nextPageToken
@@ -219,4 +242,15 @@ const isUserInConversation = async (userId, conversationId) => {
     .eq(userId)
     .exec()
   return participant.length > 0
+}
+
+/**
+ * Extract the recipient's ID from the participantPairKey
+ * @param {string} participantPairKey - The participant pair key (e.g., "userId1#userId2")
+ * @param {string} currentUserId - The ID of the current user
+ * @returns {string} - The recipient's ID
+ */
+const extractRecipientId = (participantPairKey, currentUserId) => {
+  const [id1, id2] = participantPairKey.split('#') // Split the key into two IDs
+  return id1 === currentUserId ? id2 : id1 // Return the ID that is not the current user's ID
 }

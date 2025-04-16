@@ -50,7 +50,7 @@ router.get('/:conversationId', getConversationById)
  * @desc    Get messages for a specific conversation with pagination (latest to oldest)
  * @access  Authenticated user
  * @params  { conversationId: string }
- * @query   { limit?: number, lastEvaluatedKey?: string }
+ * @query   { limit?: number, lastMessageId?: string }
  * @returns { messages: Array | [], lastEvaluatedKey: string | null }
  */
 router.get('/:conversationId/messages', getMessagesForConversation)

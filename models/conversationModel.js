@@ -1,62 +1,62 @@
-const dynamoose = require('../config/database');
-const { v4: uuidv4 } = require('uuid'); // Import UUID v4 for unique IDs
+const dynamoose = require('../config/database')
+const { v4: uuidv4 } = require('uuid') // Import UUID v4 for unique IDs
 
 const conversationSchema = new dynamoose.Schema({
   // Partition Key
   conversationId: {
     type: String,
     hashKey: true,
-    default: () => uuidv4(), // Automatically generate a UUID v4
+    default: () => uuidv4() // Automatically generate a UUID v4
   },
   type: {
     type: String,
     enum: ['ONE-TO-ONE', 'GROUP'],
-    required: true,
+    required: true
   },
   // ONE-TO-ONE only (GSI)
   participantPairKey: {
     type: String,
     required: function () {
-      return this.type === 'ONE-TO-ONE';
+      return this.type === 'ONE-TO-ONE'
     },
     index: {
       global: true,
-      name: 'participantPairKeyIndex',
-    },
+      name: 'participantPairKeyIndex'
+    }
   },
   // GROUP only
   groupImage: {
-    type: String,
+    type: String
   },
   groupName: {
-    type: String,
+    type: String
   },
   creatorId: {
     type: String,
     required: function () {
-      return this.type === 'GROUP';
-    },
+      return this.type === 'GROUP'
+    }
   },
   // Common fields
   createdAt: {
     type: String,
-    default: () => new Date().toISOString(),
+    default: () => new Date().toISOString()
   },
   updatedAt: {
     type: String,
-    default: () => new Date().toISOString(),
+    default: () => new Date().toISOString()
   },
   lastMessageText: {
-    type: String,
+    type: String
   },
   lastMessageAt: {
-    type: String,
+    type: String
   },
   isDeleted: {
     type: Boolean,
-    default: false,
-  },
-});
+    default: false
+  }
+})
 
-const Conversation = dynamoose.model('Conversations', conversationSchema);
-module.exports = Conversation;
+const Conversation = dynamoose.model('Conversations', conversationSchema)
+module.exports = Conversation

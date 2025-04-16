@@ -47,5 +47,5 @@ const messageSchema = new dynamoose.Schema({
   }
 })
 
-const Message = dynamoose.model('messages', messageSchema)
+const Message = dynamoose.model('Messages', messageSchema)
 module.exports = Message
