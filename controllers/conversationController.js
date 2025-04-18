@@ -2,6 +2,7 @@ const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
 const User = require('../models/userModel')
+const { isUserInConversation } = require('../utils/authorization')
 
 /**
  * Create a ONE-TO-ONE conversation
@@ -230,18 +231,6 @@ exports.getConversationsForUser = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
-}
-
-/**
- * Check if a user is in a conversation
- */
-const isUserInConversation = async (userId, conversationId) => {
-  const participant = await ConversationParticipants.query('conversationId')
-    .eq(conversationId)
-    .where('userId')
-    .eq(userId)
-    .exec()
-  return participant.length > 0
 }
 
 /**

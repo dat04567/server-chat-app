@@ -11,7 +11,7 @@ const messageSchema = new dynamoose.Schema({
   messageId: {
     type: String,
     rangeKey: true, // Sort key
-    default: () => `${new Date().toISOString()}~${uuidv1()}` // Combine createdAt and UUID v1
+    default: () => `${new Date().toISOString()}_${uuidv1()}` // Combine createdAt and UUID v1
   },
   createdAt: {
     type: String,
@@ -26,16 +26,23 @@ const messageSchema = new dynamoose.Schema({
     required: true // Sender ID is mandatory
   },
   recipientId: {
-    type: String // Optional for ONE-TO-ONE conversations
+    type: String,
+    required: function () {
+      // required for one-to-one conversations
+      return this.type === 'ONE-TO-ONE'
+    }
   },
   type: {
     type: String,
-    enum: ['TEXT', 'IMAGE', 'VIDEO', 'FILE'], // Allowed message types
+    enum: ['TEXT', 'MEDIA'], // Allowed message types
     required: true // Message type is mandatory
   },
   content: {
     type: String,
-    required: true // Message content is mandatory
+    required: function () {
+      // Only required for TEXT messages
+      return this.type === 'TEXT'
+    }
   },
   status: {
     type: String,
