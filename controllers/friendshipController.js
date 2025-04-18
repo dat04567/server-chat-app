@@ -2,6 +2,19 @@ const Friendship = require('../models/friendshipModel')
 const User = require('../models/userModel')
 const { handleError } = require('../utils')
 
+/**
+ * Deletes a friendship entry and its reverse entry.
+ * @param {string} userId - The ID of the user initiating the deletion.
+ * @param {string} friendId - The ID of the other user in the friendship.
+ */
+const deleteFriendshipEntry = async (userId, friendId) => {
+  // Delete the friendship entry
+  await Friendship.delete({ userId, friendId })
+
+  // Delete the reverse entry as well
+  await Friendship.delete({ userId: friendId, friendId: userId })
+}
+
 // Send a friend request
 exports.sendFriendRequest = async (req, res) => {
   try {
@@ -30,22 +43,31 @@ exports.sendFriendRequest = async (req, res) => {
     // Check if a friendship already exists
     const existingFriendship = await Friendship.get({ userId, friendId })
     if (existingFriendship) {
-      return res.status(400).json({ error: 'Friendship already exists.' })
+      return res.status(400).json({
+        error: 'Friendship already exists (either accepted or pending).'
+      })
     }
+
+    // Get the current timestamp
+    const timestamp = new Date().toISOString()
 
     // Create bi-directional friendship entries
     const friendship1 = new Friendship({
       userId,
       friendId,
       initiatorId: userId,
-      status: 'PENDING'
+      status: 'PENDING',
+      createdAt: timestamp,
+      updatedAt: timestamp
     })
 
     const friendship2 = new Friendship({
       userId: friendId,
       friendId: userId,
       initiatorId: userId,
-      status: 'PENDING'
+      status: 'PENDING',
+      createdAt: timestamp,
+      updatedAt: timestamp
     })
 
     // Perform batch write
@@ -64,19 +86,30 @@ exports.sendFriendRequest = async (req, res) => {
 exports.acceptFriendRequest = async (req, res) => {
   try {
     const userId = req.user.id // Extracted from JWT middleware
-    const { friendId } = req.params
+    const { friendId } = req.params // The ID of the other user
 
     // Check if there's a friendId
     if (!friendId) {
-      return res.status(400).json({ error: 'friendId is required' })
+      return res
+        .status(400)
+        .json({ message: 'friendId is required.', data: null })
     }
 
     // Fetch the friendship entry
     const friendship = await Friendship.get({ userId, friendId })
     if (!friendship || friendship.status !== 'PENDING') {
-      return res
-        .status(404)
-        .json({ error: 'Friend request not found or already processed.' })
+      return res.status(404).json({
+        message: 'Friend request not found or already processed.',
+        data: null
+      })
+    }
+
+    // Ensure the current user is the recipient of the friend request
+    if (friendship.initiatorId === userId) {
+      return res.status(403).json({
+        message: 'You cannot accept a friend request you sent.',
+        data: null
+      })
     }
 
     // Update the status to ACCEPTED
@@ -95,42 +128,9 @@ exports.acceptFriendRequest = async (req, res) => {
       await reverseFriendship.save()
     }
 
-    res.status(200).json({ message: 'Friend request accepted.', friendship })
-  } catch (error) {
-    handleError(error, req, res)
-  }
-}
-
-// Delete a friendship (used for canceling, rejecting, or unfriending)
-exports.deleteFriendship = async (req, res) => {
-  try {
-    const userId = req.user.id // Extracted from JWT middleware
-    const { friendId } = req.params // The ID of the other user
-
-    // Check if there's a friendId
-    if (!friendId) {
-      return res
-        .status(400)
-        .json({ message: 'friendId is required.', data: null })
-    }
-
-    // Fetch the friendship entry
-    const friendship = await Friendship.get({ userId, friendId })
-    if (!friendship) {
-      return res
-        .status(404)
-        .json({ message: 'Friendship not found.', data: null })
-    }
-
-    // Delete the friendship entry
-    await Friendship.delete({ userId, friendId })
-
-    // Delete the reverse entry as well
-    await Friendship.delete({ userId: friendId, friendId: userId })
-
     res.status(200).json({
-      message: 'Friendship removed successfully',
-      data: null
+      message: 'Friend request accepted successfully.',
+      friendship
     })
   } catch (error) {
     handleError(error, req, res)
@@ -142,7 +142,7 @@ exports.listFriends = async (req, res) => {
   try {
     const userId = req.user.id
 
-    // Query using the LSI
+    // Query friendships where the current user is involved and the status is ACCEPTED
     const friendships = await Friendship.query('userId')
       .eq(userId)
       .using('StatusIndex') // Use the LSI
@@ -150,7 +150,24 @@ exports.listFriends = async (req, res) => {
       .eq('ACCEPTED')
       .exec()
 
-    res.status(200).json({ friends: friendships })
+    // Extract the friendIds from the friendships
+    const friendIds = friendships.map((friendship) => friendship.friendId)
+
+    // Fetch user profiles for each friendId
+    const friends = await Promise.all(
+      friendIds.map(async (friendId) => {
+        const friend = await User.get(friendId)
+        return {
+          userId: friend.id,
+          profile: friend.profile
+        }
+      })
+    )
+
+    res.status(200).json({
+      message: 'Friends retrieved successfully.',
+      friends
+    })
   } catch (error) {
     handleError(error, req, res)
   }
@@ -173,9 +190,21 @@ exports.listSentRequests = async (req, res) => {
       (request) => request.initiatorId === userId
     )
 
+    // Fetch user profiles for each friendId
+    const requests = await Promise.all(
+      sentRequests.map(async (request) => {
+        const friend = await User.get(request.friendId)
+        return {
+          userId: friend.id,
+          profile: friend.profile,
+          createdAt: request.createdAt // Include the createdAt field
+        }
+      })
+    )
+
     res.status(200).json({
       message: 'Sent friend requests retrieved successfully.',
-      sentRequests
+      requests
     })
   } catch (error) {
     handleError(error, req, res)
@@ -199,9 +228,130 @@ exports.listReceivedRequests = async (req, res) => {
       (request) => request.initiatorId !== userId
     )
 
+    // Fetch user profiles for each friendId
+    const requests = await Promise.all(
+      receivedRequests.map(async (request) => {
+        const friend = await User.get(request.friendId)
+        return {
+          userId: friend.id,
+          profile: friend.profile,
+          createdAt: request.createdAt // Include the createdAt field
+        }
+      })
+    )
+
     res.status(200).json({
       message: 'Received friend requests retrieved successfully.',
-      receivedRequests
+      requests
+    })
+  } catch (error) {
+    handleError(error, req, res)
+  }
+}
+
+// Cancel a sent friend request
+exports.cancelFriendRequest = async (req, res) => {
+  try {
+    const userId = req.user.id // Extracted from JWT middleware
+    const { friendId } = req.params // The ID of the other user
+
+    // Check if there's a friendId
+    if (!friendId) {
+      return res
+        .status(400)
+        .json({ message: 'friendId is required.', data: null })
+    }
+
+    // Fetch the friendship entry
+    const friendship = await Friendship.get({ userId, friendId })
+    if (
+      !friendship ||
+      friendship.initiatorId !== userId ||
+      friendship.status !== 'PENDING'
+    ) {
+      return res.status(403).json({
+        message: 'You can only cancel your own pending friend requests.',
+        data: null
+      })
+    }
+
+    // Delete the friendship entry
+    await deleteFriendshipEntry(userId, friendId)
+
+    res.status(200).json({
+      message: 'Friend request canceled successfully.',
+      data: null
+    })
+  } catch (error) {
+    handleError(error, req, res)
+  }
+}
+
+// Reject a received friend request
+exports.rejectFriendRequest = async (req, res) => {
+  try {
+    const userId = req.user.id // Extracted from JWT middleware
+    const { friendId } = req.params // The ID of the other user
+
+    // Check if there's a friendId
+    if (!friendId) {
+      return res
+        .status(400)
+        .json({ message: 'friendId is required.', data: null })
+    }
+
+    // Fetch the friendship entry
+    const friendship = await Friendship.get({ userId, friendId })
+    if (
+      !friendship ||
+      friendship.initiatorId === userId ||
+      friendship.status !== 'PENDING'
+    ) {
+      return res.status(403).json({
+        message: 'You can only reject friend requests sent to you.',
+        data: null
+      })
+    }
+
+    // Delete the friendship entry
+    await deleteFriendshipEntry(userId, friendId)
+
+    res.status(200).json({
+      message: 'Friend request rejected successfully.',
+      data: null
+    })
+  } catch (error) {
+    handleError(error, req, res)
+  }
+}
+
+// Unfriend an existing friend
+exports.unfriend = async (req, res) => {
+  try {
+    const userId = req.user.id // Extracted from JWT middleware
+    const { friendId } = req.params // The ID of the other user
+
+    // Check if there's a friendId
+    if (!friendId) {
+      return res
+        .status(400)
+        .json({ message: 'friendId is required.', data: null })
+    }
+
+    // Fetch the friendship entry
+    const friendship = await Friendship.get({ userId, friendId })
+    if (!friendship || friendship.status !== 'ACCEPTED') {
+      return res
+        .status(404)
+        .json({ message: 'Friendship not found.', data: null })
+    }
+
+    // Delete the friendship entry
+    await deleteFriendshipEntry(userId, friendId)
+
+    res.status(200).json({
+      message: 'Friendship removed successfully.',
+      data: null
     })
   } catch (error) {
     handleError(error, req, res)

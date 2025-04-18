@@ -31,7 +31,7 @@ exports.generateVerificationToken = () => {
 exports.sendVerificationEmail = async (email, token, userId) => {
   // Construct verification URL
   const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000'
-  const verifyUrl = `${baseUrl}/verify-email?token=${token}&userId=${userId}&email=${encodeURIComponent(
+  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${token}&userId=${userId}&email=${encodeURIComponent(
     email
   )}`
 
