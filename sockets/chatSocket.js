@@ -23,7 +23,6 @@ module.exports = (io) => {
         : {};
       const token = cookieObject['token'] || cookieObject['access_token'] || null;
 
-
       if (!token) {
         return next(new Error('Không được xác thực - Token không tồn tại'));
       }
@@ -50,10 +49,8 @@ module.exports = (io) => {
       userSockets[userId] = [];
     }
     userSockets[userId].push(socket.id);
-
     // Cập nhật trạng thái người dùng thành trực tuyến
     updateUserStatus(userId, 'ONLINE');
-
     // Tham gia vào các phòng cho các cuộc trò chuyện hiện có
     joinUserConversations(socket, userId);
 
@@ -62,8 +59,6 @@ module.exports = (io) => {
       try {
         const { recipientId, content, type } = data;
 
-        console.log(type);
-
         // Xử lý cuộc trò chuyện một-một
         if (type === 'ONE-TO-ONE') {
           const conversationData = await createOrGetOneToOneConversation(
@@ -71,6 +66,10 @@ module.exports = (io) => {
             recipientId,
             content
           );
+
+
+
+          // console.log(conversationData);
 
 
           // Thông báo cho người khởi tạo
@@ -124,30 +123,34 @@ module.exports = (io) => {
 
     // Sự kiện gửi tin nhắn
     socket.on('send_message', async (data) => {
+
       try {
         const { conversationId, content, type = 'TEXT' } = data;
-
+        console.log(`${socket.userId} is part of the convo`);
         // Kiểm tra xem người dùng có trong cuộc trò chuyện không
+
         const isParticipant = await isUserInConversation(userId, conversationId);
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'Không có quyền gửi tin nhắn vào cuộc trò chuyện này',
+            message: 'Không có quyền gửi tin nhắn vào cuộc trò chuyện này'
           });
         }
 
-        // Tạo tin nhắn mới
-        const newMessage = await createMessage(
+
+        const newMessage = await handleNewMessage(
           conversationId,
           userId,
-          content,
-          type
+          type,
+          content
         );
 
-        // Cập nhật thông tin cuộc trò chuyện
-        await updateConversationLastMessage(conversationId, content);
+        //   console.log(
+        //     `newMessage saved successfully in backend ${JSON.stringify(newMessage)}`
+        //   )
+
 
         // Gửi tin nhắn đến tất cả người tham gia trong phòng
-        io.to(conversationId).emit('new_message', newMessage);
+        socket.to(conversationId).emit('new_message', newMessage);
       } catch (error) {
         socket.emit('error', { message: error.message });
       }
@@ -223,7 +226,6 @@ module.exports = (io) => {
     recipientId,
     initialContent
   ) {
-
     // Kiểm tra nếu người gửi và người nhận là cùng một người
     const isSelfConversation = senderId === recipientId;
 
@@ -232,22 +234,27 @@ module.exports = (io) => {
     const participantPairKey = `${sortedIds[0]}#${sortedIds[1]}`;
 
     try {
+      const timestamp = new Date().toISOString();
+      let conversation, participants, isExisting = false;
 
-
-      // Use the proper index name and query properly
+      // Truy vấn cuộc trò chuyện hiện có
       const existingConversations = await Conversation.query('participantPairKey')
         .eq(participantPairKey)
         .exec();
 
-
       if (existingConversations && existingConversations.length > 0) {
-        const existingConversation = existingConversations[0];
+        isExisting = true;
+        conversation = existingConversations[0];
 
-
+        // Lấy participants cho cuộc trò chuyện hiện có
+        participants = await ConversationParticipants.query('conversationId')
+          .using('conversationIdIndex')
+          .eq(conversation.conversationId)
+          .exec();
 
         // Tạo tin nhắn mới trong cuộc trò chuyện hiện có
-        const newMessage = await createMessage(
-          existingConversation.conversationId,
+        await createMessage(
+          conversation.conversationId,
           senderId,
           initialContent,
           'TEXT',
@@ -255,78 +262,121 @@ module.exports = (io) => {
         );
 
         // Cập nhật thông tin cuộc trò chuyện
-        await updateConversationLastMessage(
-          existingConversation.conversationId,
-          initialContent
-        );
-
-        return {
-          conversationId: existingConversation.conversationId,
-        };
-      }
-
-      // Tạo cuộc trò chuyện mới
-      const timestamp = new Date().toISOString();
-      const newConversation = new Conversation({
-        type: 'ONE-TO-ONE',
-        participantPairKey,
-        lastMessageText: initialContent,
-        lastMessageAt: timestamp,
-      });
-
-      const savedConversation = await newConversation.save();
-
-
-      let participants = [];
-
-      if (isSelfConversation) {
-        // Nếu là tự nhắn tin với chính mình, chỉ tạo một bản ghi participant
-        participants = [
-          {
-            userId: senderId,
-            conversationId: savedConversation.conversationId,
-            lastMessageAt: timestamp,
-          }
-        ];
+        await Promise.all([
+          // Cập nhật conversation
+          Conversation.update(
+            { conversationId: conversation.conversationId },
+            {
+              lastMessageText: initialContent,
+              lastMessageAt: timestamp,
+              updatedAt: timestamp,
+            }
+          ),
+          // Cập nhật lastMessageAt cho tất cả participants
+          ...participants.map(participant =>
+            ConversationParticipants.update(
+              {
+                userId: participant.userId,
+                conversationId: conversation.conversationId,
+              },
+              { lastMessageAt: timestamp }
+            )
+          )
+        ]);
       } else {
-        // Trường hợp bình thường với hai người dùng khác nhau
-        participants = [
-          {
+        // Tạo cuộc trò chuyện mới
+        const newConversation = new Conversation({
+          type: 'ONE-TO-ONE',
+          participantPairKey,
+          lastMessageText: initialContent,
+          lastMessageAt: timestamp,
+        });
+
+        conversation = await newConversation.save();
+
+        // Tạo participants
+        if (isSelfConversation) {
+          // Nếu là tự nhắn tin với chính mình, chỉ tạo một participant
+          participants = [{
             userId: senderId,
-            conversationId: savedConversation.conversationId,
+            conversationId: conversation.conversationId,
             lastMessageAt: timestamp,
-          },
-          {
-            userId: recipientId,
-            conversationId: savedConversation.conversationId,
-            lastMessageAt: timestamp,
-          },
-        ];
+          }];
+        } else {
+          // Trường hợp với hai người dùng khác nhau
+          participants = [
+            {
+              userId: senderId,
+              conversationId: conversation.conversationId,
+              lastMessageAt: timestamp,
+            },
+            {
+              userId: recipientId,
+              conversationId: conversation.conversationId,
+              lastMessageAt: timestamp,
+            },
+          ];
+        }
+
+        // Tạo participants và tin nhắn đầu tiên song song
+        await Promise.all([
+          ...participants.map(participant => ConversationParticipants.create(participant)),
+          createMessage(
+            conversation.conversationId,
+            senderId,
+            initialContent,
+            'TEXT',
+            recipientId
+          )
+        ]);
       }
 
+      // Lấy thông tin đối tác (partner) - luôn thực hiện bất kể mới hay cũ
+      let partnerInfo = null;
+      let senderParticipant = participants.find(p => p.userId === recipientId);
 
-      await Promise.all(
-        participants.map((participant) =>
-          ConversationParticipants.create(participant)
-        )
-      );
+      if (!isSelfConversation) {
+        // Lấy thông tin người dùng đối tác từ database
+        const partner = await User.get(recipientId);
 
+        if (partner) {
+          partnerInfo = {
+            userId: partner.id,
+            username: partner.username,
+            profile: partner.profile || {},
+            status: partner.status || 'OFFLINE',
+            lastSeen: partner.lastSeen
+          };
+        }
+      }
 
-      // // Tạo tin nhắn đầu tiên
-      await createMessage(
-        savedConversation.conversationId,
-        senderId,
-        initialContent,
-        'TEXT',
-        recipientId
-      );
-
-      return {
-        conversationId: savedConversation.conversationId
+      // Tạo đối tượng kết quả đầy đủ
+      const resultData = {
+        conversation: conversation,
+        conversationId: conversation.conversationId,
+        type: 'ONE-TO-ONE',
+        lastMessageText: initialContent,
+        lastMessageAt: timestamp
       };
+
+      // Thêm thông tin partner và participantInfo
+      if (partnerInfo) {
+        resultData.partner = partnerInfo;
+
+        if (senderParticipant) {
+          resultData.participantInfo = {
+            joinedAt: senderParticipant.joinedAt || timestamp,
+            lastReadAt: timestamp, // Cập nhật lastReadAt cho người gửi
+            isMuted: senderParticipant.isMuted || false,
+            isArchived: senderParticipant.isArchived || false
+          };
+        }
+      }
+
+      return resultData;
     } catch (error) {
       console.error("Error in createOrGetOneToOneConversation:", error);
-      throw error; // Re-throw to be handled by the caller
+      throw error;
     }
   }
 
@@ -439,3 +489,50 @@ module.exports = (io) => {
     }
   }
 };
+
+// create, save new message and update lastMessageAt, lastMessageText for all participants
+async function handleNewMessage(
+  conversationId,
+  senderId,
+  type = 'TEXT',
+  content
+) {
+  // Create the message
+  const newMessage = new Message({
+    conversationId,
+    senderId,
+    type,
+    content
+  });
+
+  const savedMessage = await newMessage.save();
+
+  // Update the lastMessageAt and lastMessageText in the Conversations table
+  const lastMessageAt = savedMessage.createdAt;
+  const lastMessageText = content;
+  await Conversation.update(
+    { conversationId },
+    { lastMessageAt, lastMessageText }
+  );
+
+  // Use the GSI to query participants by conversationId
+  const participants = await ConversationParticipants.query('conversationId')
+    .using('conversationIdIndex') // Use the GSI
+    .eq(conversationId)
+    .exec();
+
+  // Update the lastMessageAt for all participants
+  await Promise.all(
+    participants.map((participant) =>
+      ConversationParticipants.update(
+        {
+          userId: participant.userId,
+          conversationId: participant.conversationId
+        }, // Composite key
+        { lastMessageAt }
+      )
+    )
+  );
+
+  return savedMessage;
+}

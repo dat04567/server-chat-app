@@ -3,6 +3,7 @@ const ConversationParticipants = require('../models/conversationParticipantsMode
 const Message = require('../models/messageModel');
 const User = require('../models/userModel');
 const { v1: uuidv1 } = require('uuid');
+const { io } = require('../utils/socket'); // Import socket.io instance
 
 exports.sendMessage = async (req, res) => {
   try {
@@ -54,6 +55,9 @@ exports.sendMessage = async (req, res) => {
         )
       )
     );
+
+    // Emit socket event to notify all participants about the new message
+    io.to(conversationId).emit('new_message', savedMessage);
 
     res.status(201).json(savedMessage);
   } catch (error) {

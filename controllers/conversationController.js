@@ -291,6 +291,7 @@ exports.getConversationsForUser = async (req, res) => {
     });
 
 
+
     // 5. Lấy thông tin người dùng cần thiết trong một lần gọi
     const userProfiles = await User.batchGet([...uniqueUserIds], {
       ProjectionExpression: "id, username, profile"
@@ -376,7 +377,9 @@ exports.getConversationsForUser = async (req, res) => {
         }
         return null;
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+
 
     res.status(200).json({
       conversations: conversations_result,

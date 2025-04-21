@@ -2,19 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
-const socketIo = require('socket.io');
 const apiRoutes = require('./routes/index');
-const chatSocket = require('./sockets/chatSocket');
+const { initializeSocket } = require('./utils/socket');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-   transports: ['websocket'],
-   cors: {
-      origin: '*', // Trong môi trường sản xuất, hãy giới hạn nguồn gốc cụ thể
-      methods: ['GET', 'POST']
-   }
-});
+
+// Initialize socket.io with our new structure
+const io = initializeSocket(server);
 
 const PORT = process.env.PORT || 3000;
 
@@ -22,9 +17,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-
-// Initialize Socket.IO with chatSocket - ONLY USE ONE SOCKET IMPLEMENTATION
-chatSocket(io);
 
 // Đặt Socket.IO vào app để routes có thể truy cập
 app.set('io', io);
