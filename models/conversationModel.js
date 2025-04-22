@@ -37,6 +37,18 @@ const conversationSchema = new dynamoose.Schema({
       return this.type === 'GROUP'
     }
   },
+  creatorLeft: {
+    type: Boolean,
+    default: false,
+    required: function () {
+      return this.type === 'GROUP'
+    }
+  },
+  pendingParticipantIds: {
+    type: Array, // List of user IDs awaiting approval
+    schema: [String],
+    default: [] // Default to an empty array
+  },
   // Common fields
   createdAt: {
     type: String,

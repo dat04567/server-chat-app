@@ -26,7 +26,7 @@ app.use(express.urlencoded({ extended: false }))
 app.use(
   cors({
     origin: '*', // In production, restrict this
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
   })
@@ -72,7 +72,5 @@ app.use((err, req, res, next) => {
 //   console.log(`Server is running on port ${PORT}`)
 // })
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(
-    `Server is running on port ${PORT} and accepting connections from all interfaces`
-  )
+  console.log(`Server is running on port ${PORT} and accepting connections from all interfaces`)
 })

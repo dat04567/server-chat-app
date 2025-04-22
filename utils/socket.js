@@ -27,6 +27,35 @@ module.exports = (io) => {
     }
   })
 
+  // io.use((socket, next) => {
+  //   try {
+  //     // Parse cookies from the handshake headers
+  //     const cookieObject = socket.handshake.headers['cookie']
+  //       ? socket.handshake.headers['cookie'].split(';').reduce((acc, cookie) => {
+  //           const [key, value] = cookie.split('=')
+  //           acc[key.trim()] = decodeURIComponent(value)
+  //           return acc
+  //         }, {})
+  //       : {}
+
+  //     // Retrieve the token from the cookies
+  //     const token = cookieObject['token'] || cookieObject['access_token'] || null
+
+  //     if (!token) {
+  //       return next(new Error('Authentication error: Token not provided in cookies'))
+  //     }
+
+  //     // Verify the token
+  //     const decoded = jwt.verify(token, process.env.JWT_SECRET)
+
+  //     // Assign userId to the socket
+  //     socket.userId = decoded.id
+  //     next()
+  //   } catch (error) {
+  //     return next(new Error('Authentication error: Invalid token'))
+  //   }
+  // })
+
   // CONNECTION
   io.on('connection', (socket) => {
     const userId = socket.userId

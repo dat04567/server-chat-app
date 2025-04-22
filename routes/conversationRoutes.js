@@ -3,13 +3,16 @@ const {
   createOneToOneConversation,
   createGroupConversation,
   getConversationById,
-  getConversationsForUser
+  getConversationsForUser,
+  inviteMember,
+  approveMember,
+  rejectMember,
+  removeMember,
+  updateMemberRole,
+  deleteConversation,
+  leaveGroup
 } = require('../controllers/conversationController')
-const {
-  getMessagesForConversation,
-  sendMessage,
-  getMessageById
-} = require('../controllers/messageController')
+const { getMessagesForConversation, sendMessage, getMessageById } = require('../controllers/messageController')
 
 const router = express.Router()
 
@@ -89,5 +92,76 @@ router.post('/:conversationId/messages', sendMessage)
  * @returns { message: object }
  */
 router.get('/:conversationId/messages/:messageId', getMessageById)
+
+/**
+ * @route   POST /api/conversations/:conversationId/invite
+ * @desc    Invite a user to a group conversation
+ * @access  Authenticated user
+ * @params  { conversationId: string }
+ * @body    { invitedUserId: string }
+ * @returns {
+ *   message: string,
+ *   pendingParticipantIds?: string[] // If the inviter is not an admin, the user is added to the pending list
+ * }
+ */
+router.post('/:conversationId/invite', inviteMember)
+
+/**
+ * @route   POST /api/conversations/:conversationId/approve
+ * @desc    Approve a pending invitation to a group conversation
+ * @access  Authenticated user (Admin or Creator)
+ * @params  { conversationId: string }
+ * @body    { approvedUserId: string }
+ * @returns { message: string }
+ */
+router.post('/:conversationId/approve', approveMember)
+
+/**
+ * @route   POST /api/conversations/:conversationId/reject
+ * @desc    Reject a pending invitation to a group conversation
+ * @access  Authenticated user (Admin or Creator)
+ * @params  { conversationId: string }
+ * @body    { rejectedUserId: string }
+ * @returns { message: string }
+ */
+router.post('/:conversationId/reject', rejectMember)
+
+/**
+ * @route   DELETE /api/conversations/:conversationId/members/:userId
+ * @desc    Remove a user from a group conversation
+ * @access  Authenticated user (Admin or Creator)
+ * @params  { conversationId: string, userId: string }
+ * @returns { message: string }
+ */
+router.delete('/:conversationId/members/:userId', removeMember)
+
+/**
+ * @route   PATCH /api/conversations/:conversationId/members/:userId/role
+ * @desc    Promote or demote a user to/from admin in a group conversation
+ * @access  Authenticated user (Creator only)
+ * @params  { conversationId: string, userId: string }
+ * @body    { isAdmin: boolean }
+ * @returns { message: string }
+ */
+router.patch('/:conversationId/members/:userId/role', updateMemberRole)
+
+/**
+ * @route   DELETE /api/conversations/:conversationId
+ * @desc    Delete a conversation (only for the creator)
+ * @access  Authenticated user (Creator only)
+ * @params  { conversationId: string }
+ * @returns { message: string }
+ */
+router.delete('/:conversationId', deleteConversation)
+
+/**
+ * @route   DELETE /api/conversations/:conversationId/leave
+ * @desc    Leave a group conversation
+ * @access  Authenticated user
+ * @params  { conversationId: string }
+ * @body    { newAdmins?: string[] } // Required if the creator is leaving and there are no admins
+ * @returns { message: string }
+ */
+router.delete('/:conversationId/leave', leaveGroup)
 
 module.exports = router
