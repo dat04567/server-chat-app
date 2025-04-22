@@ -234,16 +234,50 @@ exports.getConversationById = async (req, res) => {
     }
 
     // Fetch the conversation
-    const conversation = await Conversation.get(conversationId)
+    const conversation = await Conversation.get({ conversationId })
 
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' })
     }
 
-    conversation.conversationId = conversationId // Ensure conversationId is included in the response
+    // Format the response based on the type of the conversation
+    if (conversation.type === 'GROUP') {
+      // Fetch all participants in the group
+      const participants = await ConversationParticipants.query('conversationId').eq(conversationId).using('conversationIdIndex').exec()
+
+      // Fetch user details for each participant
+      const participantDetails = await Promise.all(
+        participants.map(async (participant) => {
+          const user = await User.get(participant.userId)
+          return {
+            userId: participant.userId,
+            profile: user.profile, // Assuming the User schema has a "profile" field
+            isAdmin: participant.isAdmin,
+            isCreator: participant.userId === conversation.creatorId // Check if the participant is the creator
+          }
+        })
+      )
+
+      // Fetch pending participants
+      const pendingParticipants = await Promise.all(
+        (conversation.pendingParticipantIds || []).map(async (pendingUserId) => {
+          const user = await User.get(pendingUserId)
+          return {
+            userId: pendingUserId,
+            profile: user ? user.profile : null // Return null if the user profile is not found
+          }
+        })
+      )
+
+      // Append additional fields for GROUP conversations
+      conversation.numOfParticipants = participants.length
+      conversation.participants = participantDetails
+      conversation.pendingParticipants = pendingParticipants
+    }
 
     res.status(200).json(conversation)
   } catch (error) {
+    console.error('Error fetching conversation:', error)
     res.status(500).json({ error: error.message })
   }
 }

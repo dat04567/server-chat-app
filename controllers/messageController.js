@@ -2,6 +2,7 @@ const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
 const MessageAttachments = require('../models/messageAttachmentsModel')
+const User = require('../models/userModel')
 const { uploadAttachments } = require('../utils/s3Service') // Import the utility function
 const { isUserInConversation } = require('../utils/authorization')
 /**
@@ -15,21 +16,15 @@ exports.sendMessage = async (req, res) => {
 
     // Validate input
     if (!conversationId || !type) {
-      return res
-        .status(400)
-        .json({ error: 'conversationId and type are required' })
+      return res.status(400).json({ error: 'conversationId and type are required' })
     }
 
     if (type === 'TEXT' && !content) {
-      return res
-        .status(400)
-        .json({ error: 'Content is required for TEXT messages' })
+      return res.status(400).json({ error: 'Content is required for TEXT messages' })
     }
 
     if (type === 'MEDIA' && (!req.files || req.files.length === 0)) {
-      return res
-        .status(400)
-        .json({ error: 'At least one file is required for MEDIA messages' })
+      return res.status(400).json({ error: 'At least one file is required for MEDIA messages' })
     }
 
     // Check if the user is a participant in the conversation
@@ -50,24 +45,16 @@ exports.sendMessage = async (req, res) => {
 
     // If it's a ONE-TO-ONE conversation, extract the recipientId
     if (conversation.type === 'ONE-TO-ONE') {
-      const participants = await ConversationParticipants.query(
-        'conversationId'
-      )
-        .using('conversationIdIndex')
-        .eq(conversationId)
-        .exec()
+      const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
 
       if (participants.length !== 2) {
         return res.status(400).json({
-          error:
-            'Invalid one-to-one conversation. Expected exactly 2 participants.'
+          error: 'Invalid one-to-one conversation. Expected exactly 2 participants.'
         })
       }
 
       // Identify the recipientId (the other participant in the conversation)
-      recipientId = participants.find(
-        (participant) => participant.userId !== senderId
-      )?.userId
+      recipientId = participants.find((participant) => participant.userId !== senderId)?.userId
 
       if (!recipientId) {
         return res.status(400).json({
@@ -115,16 +102,10 @@ exports.sendMessage = async (req, res) => {
     // Update the lastMessageAt and lastMessageText in the Conversations table
     const lastMessageAt = savedMessage.createdAt
     const lastMessageText = type === 'TEXT' ? content : '[Media]'
-    await Conversation.update(
-      { conversationId },
-      { lastMessageAt, lastMessageText }
-    )
+    await Conversation.update({ conversationId }, { lastMessageAt, lastMessageText })
 
     // Update the lastMessageAt for all participants
-    const participants = await ConversationParticipants.query('conversationId')
-      .using('conversationIdIndex')
-      .eq(conversationId)
-      .exec()
+    const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
 
     await Promise.all(
       participants.map((participant) =>
@@ -186,7 +167,7 @@ exports.getMessagesForConversation = async (req, res) => {
     const messages = await query.exec()
 
     // Fetch attachments and map the desired fields
-    const messagesWithAttachments = await Promise.all(
+    const messagesWithDetails = await Promise.all(
       messages.map(async (message) => {
         // Fetch attachments for the message
         const attachments = await MessageAttachments.query('messageId')
@@ -194,12 +175,17 @@ exports.getMessagesForConversation = async (req, res) => {
           .sort('ascending') // Sort by attachmentId
           .exec()
 
-        // Return only the desired fields for the message
+        // Fetch the sender's details
+        const sender = await User.get({ id: message.senderId })
+        const senderName = sender ? `${sender.profile.firstName || ''} ${sender.profile.lastName || ''}`.trim() : 'Unknown'
+
+        // Return the message with the senderName and attachments
         return {
           conversationId: message.conversationId,
           messageId: message.messageId,
           createdAt: message.createdAt,
           senderId: message.senderId,
+          senderName, // Add the senderName field
           type: message.type,
           content: message.content,
           status: message.status,
@@ -215,10 +201,8 @@ exports.getMessagesForConversation = async (req, res) => {
     )
 
     res.status(200).json({
-      messages: messagesWithAttachments,
-      lastEvaluatedKey: messages.lastKey
-        ? JSON.stringify(messages.lastKey)
-        : null
+      messages: messagesWithDetails,
+      lastEvaluatedKey: messages.lastKey ? JSON.stringify(messages.lastKey) : null
     })
   } catch (error) {
     console.error('Error fetching messages:', error)
@@ -238,9 +222,7 @@ exports.getMessageById = async (req, res) => {
 
     // Validate input
     if (!conversationId || !messageId) {
-      return res
-        .status(400)
-        .json({ error: 'conversationId and messageId are required' })
+      return res.status(400).json({ error: 'conversationId and messageId are required' })
     }
 
     // Check if the user is a participant in the conversation

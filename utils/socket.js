@@ -133,8 +133,19 @@ module.exports = (io) => {
           })
         }
 
+        // Fetch the sender's details
+        const sender = await User.get({ id: userId })
+        if (!sender) {
+          return socket.emit('error', {
+            message: 'Sender not found'
+          })
+        }
+
         // Save the new message and update conversation details
         const newMessage = await handleNewMessage(conversationId, userId, type, content)
+
+        // Add the senderName to the newMessage object
+        newMessage.senderName = `${sender.firstName || ''} ${sender.lastName || ''}`.trim()
 
         // Emit the new message to all participants in the conversation
         io.to(conversationId).emit('new-message', newMessage)
