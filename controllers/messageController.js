@@ -53,6 +53,7 @@ exports.sendMessage = async (req, res) => {
       const participants = await ConversationParticipants.query(
         'conversationId'
       )
+        .using('conversationIdIndex')
         .eq(conversationId)
         .exec()
 
@@ -82,15 +83,23 @@ exports.sendMessage = async (req, res) => {
     }
 
     // Create the message
-    const newMessage = new Message({
+    const messageData = {
       conversationId,
       senderId,
-      recipientId, // Add recipientId only for ONE-TO-ONE conversations
       type,
       content: type === 'TEXT' ? content : null // Content is only required for TEXT messages
-    })
+    }
+
+    // Add recipientId only for ONE-TO-ONE conversations
+    if (conversation.type === 'ONE-TO-ONE') {
+      messageData.recipientId = recipientId
+    }
+
+    const newMessage = new Message(messageData)
 
     const savedMessage = await newMessage.save()
+
+    console.log(savedMessage)
 
     // Save attachments if any
     if (attachments.length > 0) {
@@ -113,6 +122,7 @@ exports.sendMessage = async (req, res) => {
 
     // Update the lastMessageAt for all participants
     const participants = await ConversationParticipants.query('conversationId')
+      .using('conversationIdIndex')
       .eq(conversationId)
       .exec()
 

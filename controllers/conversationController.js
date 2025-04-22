@@ -3,6 +3,9 @@ const ConversationParticipants = require('../models/conversationParticipantsMode
 const Message = require('../models/messageModel')
 const User = require('../models/userModel')
 const { isUserInConversation } = require('../utils/authorization')
+const Friendship = require('../models/friendshipModel')
+const { handleError } = require('../utils')
+const { v4: uuidv4 } = require('uuid')
 
 /**
  * Create a ONE-TO-ONE conversation
@@ -46,12 +49,18 @@ exports.createOneToOneConversation = async (req, res) => {
       }) // Return the existing conversation
     }
 
+    const currentTime = new Date().toISOString()
+    // console.log(currentTime)
     // Create the new conversation
     const newConversation = new Conversation({
+      conversationId: uuidv4(),
       type: 'ONE-TO-ONE',
       participantPairKey,
+      createdAt: currentTime,
+      updatedAt: currentTime,
       lastMessageText: content, // Set the initial message as the last message
-      lastMessageAt: new Date().toISOString() // Set the timestamp of the initial message
+      lastMessageAt: currentTime, // Set the timestamp of the initial message
+      isDeleted: false
     })
 
     const savedConversation = await newConversation.save()
@@ -104,7 +113,119 @@ exports.createOneToOneConversation = async (req, res) => {
  * Create a GROUP conversation
  */
 exports.createGroupConversation = async (req, res) => {
-  // implement later
+  try {
+    const creatorId = req.user.id // Extracted from JWT middleware
+    const { participantIds, groupName, groupImage } = req.body
+
+    // Validate participantIds
+    if (!participantIds || !Array.isArray(participantIds)) {
+      return res.status(400).json({
+        message: 'A list of participant IDs is required.',
+        data: null
+      })
+    }
+
+    // Filter out duplicate IDs and ensure the creator is included
+    const uniqueParticipantIds = [...new Set(participantIds)]
+    if (!uniqueParticipantIds.includes(creatorId)) {
+      uniqueParticipantIds.push(creatorId)
+    }
+
+    // Ensure the group has at least 3 members (including the creator)
+    if (uniqueParticipantIds.length < 3) {
+      return res.status(400).json({
+        message: 'A group must have at least 3 members, including the creator.',
+        data: null
+      })
+    }
+
+    // Validate that all participants are friends of the creator (excluding the creator)
+    const filteredParticipantIds = uniqueParticipantIds.filter(
+      (id) => id !== creatorId
+    )
+    const invalidParticipants = await Promise.all(
+      filteredParticipantIds.map(async (participantId) => {
+        const friendship = await Friendship.get({
+          userId: creatorId,
+          friendId: participantId
+        })
+        const reverseFriendship = await Friendship.get({
+          userId: participantId,
+          friendId: creatorId
+        })
+        if (
+          (!friendship || friendship.status !== 'ACCEPTED') &&
+          (!reverseFriendship || reverseFriendship.status !== 'ACCEPTED')
+        ) {
+          return participantId
+        }
+        return null
+      })
+    )
+
+    const nonFriends = invalidParticipants.filter((id) => id !== null)
+
+    if (nonFriends.length > 0) {
+      return res.status(400).json({
+        message: 'All participants must be friends of the creator.',
+        nonFriends,
+        data: null
+      })
+    }
+
+    const initialMessageContent = 'Welcome to my group'
+
+    console.log(`get here ${initialMessageContent}`)
+
+    // Create the group conversation
+    const conversation = new Conversation({
+      conversationId: uuidv4(),
+      type: 'GROUP',
+      groupName: groupName || 'Untitled Group',
+      groupImage: groupImage || 'default image group url',
+      creatorId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastMessageText: initialMessageContent, // Set the initial message as the last message
+      lastMessageAt: new Date().toISOString(), // Set the timestamp of the initial message
+      isDeleted: false
+    })
+
+    await conversation.save()
+
+    // Add participants to the conversation
+    const participants = uniqueParticipantIds.map((participantId) => ({
+      conversationId: conversation.conversationId,
+      userId: participantId,
+      isAdmin: participantId === creatorId, // Set the creator as admin
+      joinedAt: new Date().toISOString(),
+      lastReadAt: new Date().toISOString(),
+      lastMessageAt: conversation.lastMessageAt
+    }))
+
+    await ConversationParticipants.batchPut(participants)
+
+    // Create the initial message in the Messages table
+    const initialMessage = new Message({
+      conversationId: conversation.conversationId,
+      senderId: creatorId,
+      type: 'TEXT',
+      content: conversation.lastMessageText,
+      createdAt: conversation.lastMessageAt,
+      updatedAt: conversation.lastMessageAt
+    })
+
+    await initialMessage.save()
+
+    res.status(201).json({
+      message: 'Group conversation created successfully.',
+      conversation,
+      participants,
+      initialMessage
+    })
+  } catch (error) {
+    handleError(error, req, res)
+  }
 }
 
 /**
@@ -144,91 +265,87 @@ exports.getConversationById = async (req, res) => {
 exports.getConversationsForUser = async (req, res) => {
   try {
     const userId = req.user.id // Use the authenticated user's ID from authMiddleware
-    const { limit, lastEvaluatedKey } = req.query
-
-    const pageSize = parseInt(limit, 10) || 10
 
     // Step 1: Fetch all conversationParticipants for the user
-    let participantRecords = []
-    let lastKey
-
-    do {
-      const result = await ConversationParticipants.query('userId')
-        .eq(userId)
-        .startAt(lastKey)
-        .exec()
-
-      participantRecords = participantRecords.concat(result)
-      lastKey = result.lastKey
-    } while (lastKey)
+    const participantRecords = await ConversationParticipants.query('userId')
+      .eq(userId)
+      .exec()
 
     if (participantRecords.length === 0) {
       return res.status(200).json({
-        conversations: [],
-        lastEvaluatedKey: null
+        conversations: []
       })
     }
 
-    // Step 2: Extract conversationIds
+    // Step 2: Fetch all conversations based on participantRecords
     const conversationIds = participantRecords.map(
       (record) => record.conversationId
     )
 
-    // Step 3: Fetch conversations from the conversations table
-    const conversationPromises = conversationIds.map((conversationId) =>
-      Conversation.get(conversationId)
+    const conversations = await Promise.all(
+      conversationIds.map((conversationId) =>
+        Conversation.get({ conversationId })
+      )
     )
-    const conversations = await Promise.all(conversationPromises)
 
-    // Step 4: Construct the response
+    // Step 3: Format the response
     const responseConversations = await Promise.all(
-      conversations
-        .filter((conversation) => conversation) // Filter out null results (if any)
-        .map(async (conversation) => {
+      conversations.map(async (conversation) => {
+        // Find the participant record for the current user in this conversation
+        const participantRecord = participantRecords.find(
+          (record) => record.conversationId === conversation.conversationId
+        )
+
+        if (conversation.type === 'GROUP') {
+          // Include group-specific fields for GROUP conversations
+          return {
+            conversationId: conversation.conversationId,
+            type: conversation.type,
+            groupName: conversation.groupName,
+            groupImage: conversation.groupImage,
+            lastMessageText: conversation.lastMessageText,
+            lastMessageAt: conversation.lastMessageAt,
+            isDeleted: conversation.isDeleted,
+            unread: participantRecord ? participantRecord.unread : false // Include unread field
+          }
+        } else if (conversation.type === 'ONE-TO-ONE') {
+          // Include recipient details for ONE-TO-ONE conversations
           const recipientId = extractRecipientId(
             conversation.participantPairKey,
             userId
           )
-          const recipient = await User.get(recipientId) // Query recipient's profile
+
+          const recipient = await User.get(recipientId)
 
           return {
             conversationId: conversation.conversationId,
-            lastMessageAt: conversation.lastMessageAt,
-            lastMessageText: conversation.lastMessageText,
             type: conversation.type,
+            lastMessageText: conversation.lastMessageText,
+            lastMessageAt: conversation.lastMessageAt,
             isDeleted: conversation.isDeleted,
+            unread: participantRecord ? participantRecord.unread : false, // Include unread field
             recipient: {
-              userId: recipient.id,
+              userId: recipientId,
               profile: recipient.profile
             }
           }
-        })
+        }
+      })
     )
 
-    // Step 5: Sort conversations by lastMessageAt in descending order
-    responseConversations.sort(
-      (a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt)
-    )
+    // Step 4: Sort conversations by lastMessageAt (latest to oldest)
+    const sortedConversations = responseConversations.sort((a, b) => {
+      const dateA = new Date(a.lastMessageAt)
+      const dateB = new Date(b.lastMessageAt)
+      return dateB - dateA // Sort in descending order
+    })
 
-    // Step 6: Apply pagination at the application level
-    const startIndex = lastEvaluatedKey ? parseInt(lastEvaluatedKey, 10) : 0
-    const paginatedConversations = responseConversations.slice(
-      startIndex,
-      startIndex + pageSize
-    )
-
-    // Step 7: Generate the next page token
-    const nextPageToken =
-      startIndex + pageSize < responseConversations.length
-        ? (startIndex + pageSize).toString()
-        : null
-
-    // Step 8: Return the results
+    // Return the full list of conversations
     res.status(200).json({
-      conversations: paginatedConversations,
-      lastEvaluatedKey: nextPageToken
+      conversations: sortedConversations
     })
   } catch (error) {
+    console.error('Error fetching conversations:', error)
     res.status(500).json({ error: error.message })
   }
 }

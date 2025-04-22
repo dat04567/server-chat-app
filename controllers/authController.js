@@ -95,7 +95,7 @@ exports.register = async (req, res) => {
 // Đăng nhập
 exports.login = async (req, res) => {
   const { email, password } = req.body
-  console.log(`backend received ${email}-${password}`)
+  // console.log(`backend received ${email}-${password}`)
 
   try {
     // Tìm người dùng bằng email
@@ -138,6 +138,8 @@ exports.login = async (req, res) => {
     const token = jwt.sign({ id: user.id }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN
     })
+
+    console.log(`jwt generated using ${JWT_SECRET} : ${token}`)
 
     // Cập nhật thời gian hoạt động cuối cùng
     await User.update({

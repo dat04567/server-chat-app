@@ -1,170 +1,189 @@
-// filepath: /Users/mac/Documents/CNM/server/utils/socket.js
+const jwt = require('jsonwebtoken')
+const dynamoose = require('dynamoose') // Import dynamoose
 const User = require('../models/userModel')
 const Conversation = require('../models/conversationModel')
 const ConversationParticipants = require('../models/conversationParticipantsModel')
 const Message = require('../models/messageModel')
+const { isUserInConversation } = require('./authorization')
 
-// Đối tượng để lưu trữ kết nối socket của mỗi user
-// Thay đổi thành object chứa mảng socketIds cho mỗi userId
+// Object to store socket connections for each user (multiple devices support)
 const userSockets = {}
 
 module.exports = (io) => {
-  // Middleware xác thực (nếu cần)
+  // Authenticate Socket Connection using JWT
   io.use((socket, next) => {
-    const userId = socket.handshake.auth.userId
-    if (!userId) {
-      return next(new Error('Không được xác thực'))
+    const token = socket.handshake.auth.token
+    if (!token) {
+      return next(new Error('Authentication error: Token not provided'))
     }
 
-    socket.userId = userId
-    next()
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      // assign userId to socket
+      socket.userId = decoded.id
+      next()
+    } catch (error) {
+      next(new Error('Authentication error: Invalid token'))
+    }
   })
 
+  // CONNECTION
   io.on('connection', (socket) => {
     const userId = socket.userId
-    console.log(`User connected: ${userId}`)
+    console.log(`User connected : ${userId}`)
 
-    // Lưu trữ kết nối socket của người dùng (hỗ trợ nhiều thiết bị)
+    // If the user doesn't own any socket connection yet, create an array and store the socket
     if (!userSockets[userId]) {
       userSockets[userId] = []
     }
     userSockets[userId].push(socket.id)
 
-    // Cập nhật trạng thái người dùng thành trực tuyến
+    // Add the user to their corresponding main room (for global updates)
+    const userRoom = `user:${userId}`
+    socket.join(userRoom)
+    console.log(`User ${userId} joined room: ${userRoom}`)
+
+    // Update user's activity status
     updateUserStatus(userId, 'ONLINE')
 
-    // Tham gia vào các phòng cho các cuộc trò chuyện hiện có
-    joinUserConversations(socket, userId)
-
-    // Sự kiện bắt đầu cuộc trò chuyện mới
-    socket.on('start_conversation', async (data) => {
+    // NEW-CONVERSATION
+    socket.on('new-conversation', async ({ participantIds }) => {
       try {
-        const { recipientId, content, type } = data
-
-        // Xử lý cuộc trò chuyện một-một
-        if (type === 'ONE-TO-ONE') {
-          const conversationData = await createOrGetOneToOneConversation(
-            userId,
-            recipientId,
-            content
-          )
-
-          // Thông báo cho người khởi tạo
-          socket.emit('conversation_started', conversationData)
-
-          // Thông báo cho người nhận nếu họ đang trực tuyến
-          const recipientSocketIds = userSockets[recipientId] || []
-          recipientSocketIds.forEach((socketId) => {
-            io.to(socketId).emit('new_conversation', conversationData)
-          })
-
-          // Thêm cả hai người dùng vào phòng cuộc trò chuyện
-          socket.join(conversationData.conversation.conversationId)
-          recipientSocketIds.forEach((socketId) => {
-            io.sockets.sockets
-              .get(socketId)
-              ?.join(conversationData.conversation.conversationId)
+        // Validate the event data
+        if (!participantIds || participantIds.length === 0) {
+          return socket.emit('error', {
+            message: 'Invalid conversation data'
           })
         }
-        // Xử lý cuộc trò chuyện nhóm
-        else if (type === 'GROUP') {
-          const { groupName, participantIds } = data
-          const conversationData = await createGroupConversation(
-            userId,
-            groupName,
-            participantIds
-          )
 
-          // Thông báo cho người khởi tạo
-          socket.emit('conversation_started', conversationData)
+        console.log(`New conversation created, notifying ${participantIds.length} participants...`)
 
-          // Thông báo cho các thành viên và thêm họ vào phòng
-          for (const participantId of participantIds) {
-            const participantSocketIds = userSockets[participantId] || []
-            participantSocketIds.forEach((socketId) => {
-              io.to(socketId).emit('new_conversation', conversationData)
-              io.sockets.sockets
-                .get(socketId)
-                ?.join(conversationData.conversationId)
-            })
-          }
-
-          // Thêm người khởi tạo vào phòng
-          socket.join(conversationData.conversationId)
-        }
+        // Notify all participants about the new conversation
+        participantIds.forEach((participantId) => {
+          const participantRoom = `user:${participantId}`
+          io.to(participantRoom).emit('new-conversation')
+        })
       } catch (error) {
-        socket.emit('error', { message: error.message })
+        console.error('Error handling new-conversation event:', error)
+        socket.emit('error', {
+          message: 'Failed to notify participants about the new conversation'
+        })
       }
     })
 
-    // Sự kiện gửi tin nhắn
-    socket.on('send_message', async (data) => {
-      console.log(`message sent from ${socket.userId} : ${data}`)
+    // OPEN-CONVERSATION
+    socket.on('open-conversation', async ({ conversationId }) => {
       try {
-        const { conversationId, content, type = 'TEXT' } = data
-
-        // Kiểm tra xem người dùng có trong cuộc trò chuyện không
+        // Check if the user is a participant in the conversation
         const isParticipant = await isUserInConversation(userId, conversationId)
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'Không có quyền gửi tin nhắn vào cuộc trò chuyện này'
+            message: 'You are not authorized to join this conversation'
           })
         }
-        //   console.log(`${socket.userId} is part of the convo`)
 
-        const newMessage = await handleNewMessage(
-          conversationId,
-          userId,
-          type,
-          content
-        )
-
-        //   console.log(
-        //     `newMessage saved successfully in backend ${JSON.stringify(newMessage)}`
-        //   )
-
-        // Gửi tin nhắn đến tất cả người tham gia trong phòng
-        socket.to(conversationId).emit('new_message', newMessage)
+        // Join the user to the conversation-specific room
+        socket.join(conversationId)
+        console.log(`User ${userId} joined conversation room: ${conversationId}`)
       } catch (error) {
+        console.error('Error handling open-conversation:', error)
+        socket.emit('error', { message: 'Failed to join the conversation' })
+      }
+    })
+
+    // SEND MESSAGE
+    socket.on('send-message', async (messageObject) => {
+      try {
+        const { conversationId, type = 'TEXT', content } = messageObject
+
+        // Check if the user is a participant in the conversation
+        const isParticipant = await isUserInConversation(userId, conversationId)
+        if (!isParticipant) {
+          return socket.emit('error', {
+            message: 'You are not authorized to send messages in this conversation'
+          })
+        }
+
+        // Save the new message and update conversation details
+        const newMessage = await handleNewMessage(conversationId, userId, type, content)
+
+        // Emit the new message to all participants in the conversation
+        io.to(conversationId).emit('new-message', newMessage)
+
+        // Emit a conversation update to all the participants in the conversation
+        const lastMessageAt = newMessage.createdAt
+        const lastMessageText = content
+        const participants = await getParticipantsForConversation(conversationId)
+
+        participants.forEach((participant) => {
+          const participantRoom = `user:${participant.userId}`
+          io.to(participantRoom).emit('conversation-update', {
+            conversationId,
+            lastMessageText,
+            lastMessageAt
+          })
+        })
+      } catch (error) {
+        console.error('Error sending message:', error)
         socket.emit('error', { message: error.message })
       }
     })
 
-    // Sự kiện người dùng đang gõ
-    socket.on('typing', (data) => {
-      const { conversationId } = data
-      socket.to(conversationId).emit('user_typing', { userId, conversationId })
+    // CLOSE CONVERSATION
+    socket.on('close-conversation', async ({ conversationId }) => {
+      try {
+        // Update the user's unread status and lastReadAt
+        await ConversationParticipants.update(
+          {
+            userId,
+            conversationId
+          },
+          {
+            unread: false,
+            lastReadAt: new Date().toISOString()
+          }
+        )
+        console.log(`User ${userId} closed conversation ${conversationId}`)
+      } catch (error) {
+        console.error('Error updating conversation participant:', error)
+        socket.emit('error', {
+          message: 'Failed to update conversation status'
+        })
+      }
     })
 
-    // Sự kiện người dùng dừng gõ
-    socket.on('stop_typing', (data) => {
-      const { conversationId } = data
-      socket
-        .to(conversationId)
-        .emit('user_stop_typing', { userId, conversationId })
-    })
-
-    // Sự kiện ngắt kết nối
+    // DISCONNECT
     socket.on('disconnect', () => {
       console.log(`User disconnected: ${userId}`)
 
-      // Cập nhật trạng thái người dùng thành ngoại tuyến
-      // Chỉ cập nhật nếu không còn thiết bị nào khác đang kết nối
       if (userSockets[userId]) {
-        userSockets[userId] = userSockets[userId].filter(
-          (id) => id !== socket.id
-        )
+        // Remove this socket from the active socket list
+        userSockets[userId] = userSockets[userId].filter((id) => id !== socket.id)
 
+        // If there isn't any socket left
         if (userSockets[userId].length === 0) {
-          // Chỉ cập nhật trạng thái ngoại tuyến khi không còn thiết bị nào kết nối
+          // delete the active socket list
           updateUserStatus(userId, 'OFFLINE')
+
+          // update user's activity status
           delete userSockets[userId]
         }
       }
     })
   })
 
-  // Hàm hỗ trợ
+  // Get all participants in a conversation
+  async function getParticipantsForConversation(conversationId) {
+    try {
+      const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+      return participants
+    } catch (error) {
+      console.error('Error fetching participants for conversation:', error)
+      throw new Error('Failed to fetch participants for the conversation')
+    }
+  }
+
+  // Update user's activity status
   async function updateUserStatus(userId, status) {
     try {
       await User.update(
@@ -179,254 +198,73 @@ module.exports = (io) => {
     }
   }
 
-  async function joinUserConversations(socket, userId) {
+  // Process new message
+  async function handleNewMessage(conversationId, senderId, type = 'TEXT', content) {
     try {
-      // Lấy tất cả các cuộc trò chuyện của người dùng
-      const userConversations = await ConversationParticipants.query('userId')
-        .eq(userId)
-        .exec()
-
-      // Tham gia vào tất cả các phòng cuộc trò chuyện
-      for (const conv of userConversations) {
-        socket.join(conv.conversationId)
-      }
-    } catch (error) {
-      console.error('Error joining user conversations:', error)
-    }
-  }
-
-  async function createOrGetOneToOneConversation(
-    senderId,
-    recipientId,
-    initialContent
-  ) {
-    // Sắp xếp ID để tạo participantPairKey
-    const sortedIds = [senderId, recipientId].sort()
-    const participantPairKey = `${sortedIds[0]}#${sortedIds[1]}`
-
-    // Kiểm tra xem cuộc trò chuyện đã tồn tại chưa
-    const existingConversations = await Conversation.query('participantPairKey')
-      .eq(participantPairKey)
-      .exec()
-
-    if (existingConversations.length > 0) {
-      const existingConversation = existingConversations[0]
-
-      // Tạo tin nhắn mới trong cuộc trò chuyện hiện có
-      const newMessage = await createMessage(
-        existingConversation.conversationId,
+      // Save the message to the database
+      const newMessage = new Message({
+        conversationId,
         senderId,
-        initialContent,
-        'TEXT',
-        recipientId
-      )
+        type,
+        content
+      })
+      const savedMessage = await newMessage.save()
+      const lastMessageAt = savedMessage.createdAt
+      const lastMessageText = content
 
-      // Cập nhật thông tin cuộc trò chuyện
-      await updateConversationLastMessage(
-        existingConversation.conversationId,
-        initialContent
-      )
+      // Fetch participants for the conversation
+      const participants = await getParticipantsForConversation(conversationId)
 
-      return {
-        conversation: existingConversation,
-        message: newMessage,
-        isNew: false
+      // Debugging logs
+      // console.log('Participants:', participants)
+      // console.log('lastMessageAt:', lastMessageAt)
+      // console.log('lastMessageText:', lastMessageText)
+
+      if (!lastMessageAt || !lastMessageText || !participants || participants.length === 0) {
+        throw new Error('Invalid data for updates: Missing required fields')
       }
-    }
 
-    // Tạo cuộc trò chuyện mới
-    const timestamp = new Date().toISOString()
-    const newConversation = new Conversation({
-      type: 'ONE-TO-ONE',
-      participantPairKey,
-      lastMessageText: initialContent,
-      lastMessageAt: timestamp
-    })
-
-    const savedConversation = await newConversation.save()
-
-    // Thêm người tham gia vào cuộc trò chuyện
-    const participants = [
-      {
-        userId: senderId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp
-      },
-      {
-        userId: recipientId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp
-      }
-    ]
-
-    await Promise.all(
-      participants.map((participant) =>
-        ConversationParticipants.create(participant)
+      // Update conversation metadata
+      const updateConversationPromise = Conversation.update(
+        { conversationId },
+        {
+          lastMessageAt,
+          lastMessageText
+        }
       )
-    )
 
-    // Tạo tin nhắn đầu tiên
-    const newMessage = await createMessage(
-      savedConversation.conversationId,
-      senderId,
-      initialContent,
-      'TEXT',
-      recipientId
-    )
+      // Update participants
+      const updateParticipantsPromises = participants.map((participant) => {
+        if (!participant.userId || !participant.conversationId) {
+          console.error('Invalid participant data:', participant)
+          return Promise.resolve() // Skip invalid participants
+        }
 
-    return {
-      conversation: savedConversation,
-      message: newMessage,
-      isNew: true
-    }
-  }
+        const updates = {
+          lastMessageAt
+        }
 
-  async function createGroupConversation(creatorId, groupName, participantIds) {
-    // Tạo cuộc trò chuyện nhóm mới
-    const newConversation = new Conversation({
-      type: 'GROUP',
-      groupName: groupName || 'Nhóm mới',
-      creatorId
-    })
+        // If the participant is not the sender and the new message is later than lastReadAt, set unread to true
+        if (participant.userId !== senderId && !participant.unread && new Date(lastMessageAt) > new Date(participant.lastReadAt)) {
+          updates.unread = true
+        }
 
-    const savedConversation = await newConversation.save()
-
-    // Thêm tất cả người tham gia vào cuộc trò chuyện
-    const timestamp = new Date().toISOString()
-    const participants = [
-      // Thêm người tạo nhóm
-      {
-        userId: creatorId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp,
-        isAdmin: true
-      },
-      // Thêm các thành viên khác
-      ...participantIds.map((userId) => ({
-        userId,
-        conversationId: savedConversation.conversationId,
-        lastMessageAt: timestamp,
-        isAdmin: false
-      }))
-    ]
-
-    await Promise.all(
-      participants.map((participant) =>
-        ConversationParticipants.create(participant)
-      )
-    )
-
-    return savedConversation
-  }
-
-  // create, save new message and update lastMessageAt, lastMessageText for all participants
-  async function handleNewMessage(
-    conversationId,
-    senderId,
-    type = 'TEXT',
-    content
-  ) {
-    // Create the message
-    const newMessage = new Message({
-      conversationId,
-      senderId,
-      type,
-      content
-    })
-
-    const savedMessage = await newMessage.save()
-
-    // Update the lastMessageAt and lastMessageText in the Conversations table
-    const lastMessageAt = savedMessage.createdAt
-    const lastMessageText = content
-    await Conversation.update(
-      { conversationId },
-      { lastMessageAt, lastMessageText }
-    )
-
-    // Use the GSI to query participants by conversationId
-    const participants = await ConversationParticipants.query('conversationId')
-      .using('conversationIdIndex') // Use the GSI
-      .eq(conversationId)
-      .exec()
-
-    // Update the lastMessageAt for all participants
-    await Promise.all(
-      participants.map((participant) =>
-        ConversationParticipants.update(
+        return ConversationParticipants.update(
           {
             userId: participant.userId,
             conversationId: participant.conversationId
-          }, // Composite key
-          { lastMessageAt }
-        )
-      )
-    )
-
-    return savedMessage
-  }
-
-  async function createMessage(
-    conversationId,
-    senderId,
-    content,
-    type = 'TEXT',
-    recipientId = null
-  ) {
-    const newMessage = new Message({
-      conversationId,
-      senderId,
-      recipientId,
-      type,
-      content
-    })
-    console.log(`new message saved`)
-    return await newMessage.save()
-  }
-
-  async function updateConversationLastMessage(conversationId, content) {
-    const timestamp = new Date().toISOString()
-
-    // Cập nhật thông tin cuộc trò chuyện
-    await Conversation.update(
-      { conversationId },
-      {
-        lastMessageText: content,
-        lastMessageAt: timestamp,
-        updatedAt: timestamp
-      }
-    )
-
-    // Cập nhật lastMessageAt cho tất cả người tham gia
-    const participants = await ConversationParticipants.query('conversationId')
-      .eq(conversationId)
-      .exec()
-
-    await Promise.all(
-      participants.map((participant) =>
-        ConversationParticipants.update(
-          {
-            userId: participant.userId,
-            conversationId
           },
-          {
-            lastMessageAt: timestamp
-          }
+          updates
         )
-      )
-    )
-  }
-
-  async function isUserInConversation(userId, conversationId) {
-    try {
-      const participant = await ConversationParticipants.get({
-        userId,
-        conversationId
       })
 
-      return Boolean(participant)
+      // Execute all updates in parallel
+      await Promise.all([updateConversationPromise, ...updateParticipantsPromises])
+
+      return savedMessage
     } catch (error) {
-      return false
+      console.error('Error handling new message:', error)
+      throw new Error('Failed to process the new message')
     }
   }
 }

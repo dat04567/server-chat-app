@@ -24,6 +24,11 @@ const conversationParticipantsSchema = new dynamoose.Schema(
     lastReadAt: {
       type: String
     },
+    unread: {
+      type: Boolean,
+      required: true,
+      default: true
+    },
     isMuted: {
       type: Boolean,
       default: false // Default to false

@@ -2,19 +2,6 @@ const Friendship = require('../models/friendshipModel')
 const User = require('../models/userModel')
 const { handleError } = require('../utils')
 
-/**
- * Deletes a friendship entry and its reverse entry.
- * @param {string} userId - The ID of the user initiating the deletion.
- * @param {string} friendId - The ID of the other user in the friendship.
- */
-const deleteFriendshipEntry = async (userId, friendId) => {
-  // Delete the friendship entry
-  await Friendship.delete({ userId, friendId })
-
-  // Delete the reverse entry as well
-  await Friendship.delete({ userId: friendId, friendId: userId })
-}
-
 // Send a friend request
 exports.sendFriendRequest = async (req, res) => {
   try {
@@ -355,5 +342,43 @@ exports.unfriend = async (req, res) => {
     })
   } catch (error) {
     handleError(error, req, res)
+  }
+}
+
+/**
+ * Deletes a friendship entry and its reverse entry.
+ * @param {string} userId - The ID of the user initiating the deletion.
+ * @param {string} friendId - The ID of the other user in the friendship.
+ */
+const deleteFriendshipEntry = async (userId, friendId) => {
+  // Delete the friendship entry
+  await Friendship.delete({ userId, friendId })
+
+  // Delete the reverse entry as well
+  await Friendship.delete({ userId: friendId, friendId: userId })
+}
+
+/**
+ * Determine if friendId is friend of userId
+ * @param {string} userId - The ID of the user to determine
+ * @param {string} friendId - The ID of the other user
+ */
+exports.isFriend = async (userId, friendId) => {
+  try {
+    const friendship = await Friendship.get({ userId, friendId })
+    if (friendship && friendship.status === 'ACCEPTED') {
+      return true
+    }
+    const reverseFriendship = await Friendship.get({
+      userId: friendId,
+      friendId: userId
+    })
+    if (reverseFriendship && reverseFriendship.status === 'ACCEPTED') {
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('Error checking friendship:', error)
+    return false
   }
 }

@@ -24,11 +24,24 @@ const router = express.Router()
 router.post('/one-to-one', createOneToOneConversation)
 
 /**
+ * @route   POST /api/conversations/group
+ * @desc    Create a GROUP conversation with an initial message
+ * @access  Authenticated user
+ * @body    { participantIds: string[], groupName?: string, groupImage?: string }
+ * @returns {
+ *   message: string,
+ *   conversation: object,
+ *   participants: participantItem[],
+ *   initialMessage: object
+ * }
+ */
+router.post('/group', createGroupConversation)
+
+/**
  * @route   GET /api/conversations/
  * @desc    Get all conversations for a specific user (chronological order and pagination)
  * @access  Authenticated user
- * @query   { limit?: number, lastEvaluatedKey?: string }
- * @returns { conversations: Array | [], lastEvaluatedKey: string | null }
+ * @returns { conversations: Array | [] }
  */
 router.get('/', getConversationsForUser)
 
