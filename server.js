@@ -12,8 +12,8 @@ const server = http.createServer(app)
 const io = socketIo(server, {
   cors: {
     origin: '*', // Trong môi trường sản xuất, hãy giới hạn nguồn gốc cụ thể
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+  },
 })
 
 const PORT = process.env.PORT || 3000
@@ -28,7 +28,7 @@ app.use(
     origin: '*', // In production, restrict this
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
+    credentials: true,
   })
 )
 
@@ -53,7 +53,7 @@ app.get('/api/test-connection', (req, res) => {
   res.json({
     success: true,
     message: 'Connection successful',
-    yourIp: req.ip
+    yourIp: req.ip,
   })
 })
 
@@ -63,7 +63,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     message: 'Internal Server Error',
-    error: err.message
+    error: err.message,
   })
 })
 
@@ -72,5 +72,7 @@ app.use((err, req, res, next) => {
 //   console.log(`Server is running on port ${PORT}`)
 // })
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT} and accepting connections from all interfaces`)
+  console.log(
+    `Server is running on port ${PORT} and accepting connections from all interfaces`
+  )
 })

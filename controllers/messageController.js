@@ -16,22 +16,28 @@ exports.sendMessage = async (req, res) => {
 
     // Validate input
     if (!conversationId || !type) {
-      return res.status(400).json({ error: 'conversationId and type are required' })
+      return res
+        .status(400)
+        .json({ error: 'conversationId and type are required' })
     }
 
     if (type === 'TEXT' && !content) {
-      return res.status(400).json({ error: 'Content is required for TEXT messages' })
+      return res
+        .status(400)
+        .json({ error: 'Content is required for TEXT messages' })
     }
 
     if (type === 'MEDIA' && (!req.files || req.files.length === 0)) {
-      return res.status(400).json({ error: 'At least one file is required for MEDIA messages' })
+      return res
+        .status(400)
+        .json({ error: 'At least one file is required for MEDIA messages' })
     }
 
     // Check if the user is a participant in the conversation
     const isAuthorized = await isUserInConversation(senderId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.'
+        error: 'Access denied. You are not a participant in this conversation.',
       })
     }
 
@@ -45,20 +51,28 @@ exports.sendMessage = async (req, res) => {
 
     // If it's a ONE-TO-ONE conversation, extract the recipientId
     if (conversation.type === 'ONE-TO-ONE') {
-      const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+      const participants = await ConversationParticipants.query(
+        'conversationId'
+      )
+        .using('conversationIdIndex')
+        .eq(conversationId)
+        .exec()
 
       if (participants.length !== 2) {
         return res.status(400).json({
-          error: 'Invalid one-to-one conversation. Expected exactly 2 participants.'
+          error:
+            'Invalid one-to-one conversation. Expected exactly 2 participants.',
         })
       }
 
       // Identify the recipientId (the other participant in the conversation)
-      recipientId = participants.find((participant) => participant.userId !== senderId)?.userId
+      recipientId = participants.find(
+        (participant) => participant.userId !== senderId
+      )?.userId
 
       if (!recipientId) {
         return res.status(400).json({
-          error: 'Unable to determine the recipient for this conversation.'
+          error: 'Unable to determine the recipient for this conversation.',
         })
       }
     }
@@ -74,7 +88,7 @@ exports.sendMessage = async (req, res) => {
       conversationId,
       senderId,
       type,
-      content: type === 'TEXT' ? content : null // Content is only required for TEXT messages
+      content: type === 'TEXT' ? content : null, // Content is only required for TEXT messages
     }
 
     // Add recipientId only for ONE-TO-ONE conversations
@@ -102,17 +116,23 @@ exports.sendMessage = async (req, res) => {
     // Update the lastMessageAt and lastMessageText in the Conversations table
     const lastMessageAt = savedMessage.createdAt
     const lastMessageText = type === 'TEXT' ? content : '[Media]'
-    await Conversation.update({ conversationId }, { lastMessageAt, lastMessageText })
+    await Conversation.update(
+      { conversationId },
+      { lastMessageAt, lastMessageText }
+    )
 
     // Update the lastMessageAt for all participants
-    const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+    const participants = await ConversationParticipants.query('conversationId')
+      .using('conversationIdIndex')
+      .eq(conversationId)
+      .exec()
 
     await Promise.all(
       participants.map((participant) =>
         ConversationParticipants.update(
           {
             userId: participant.userId,
-            conversationId: participant.conversationId
+            conversationId: participant.conversationId,
           }, // Composite key
           { lastMessageAt }
         )
@@ -122,7 +142,7 @@ exports.sendMessage = async (req, res) => {
     res.status(201).json({
       message: 'Message sent successfully',
       savedMessage,
-      attachments // Include attachments in the response
+      attachments, // Include attachments in the response
     })
   } catch (error) {
     console.error('Error sending message:', error)
@@ -143,7 +163,7 @@ exports.getMessagesForConversation = async (req, res) => {
     const isAuthorized = await isUserInConversation(userId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.'
+        error: 'Access denied. You are not a participant in this conversation.',
       })
     }
 
@@ -177,7 +197,11 @@ exports.getMessagesForConversation = async (req, res) => {
 
         // Fetch the sender's details
         const sender = await User.get({ id: message.senderId })
-        const senderName = sender ? `${sender.profile.firstName || ''} ${sender.profile.lastName || ''}`.trim() : 'Unknown'
+        const senderName = sender
+          ? `${sender.profile.firstName || ''} ${
+              sender.profile.lastName || ''
+            }`.trim()
+          : 'Unknown'
 
         // Return the message with the senderName and attachments
         return {
@@ -194,15 +218,17 @@ exports.getMessagesForConversation = async (req, res) => {
             url: attachment.url,
             type: attachment.type,
             fileName: attachment.fileName,
-            mimeType: attachment.mimeType
-          }))
+            mimeType: attachment.mimeType,
+          })),
         }
       })
     )
 
     res.status(200).json({
       messages: messagesWithDetails,
-      lastEvaluatedKey: messages.lastKey ? JSON.stringify(messages.lastKey) : null
+      lastEvaluatedKey: messages.lastKey
+        ? JSON.stringify(messages.lastKey)
+        : null,
     })
   } catch (error) {
     console.error('Error fetching messages:', error)
@@ -222,14 +248,16 @@ exports.getMessageById = async (req, res) => {
 
     // Validate input
     if (!conversationId || !messageId) {
-      return res.status(400).json({ error: 'conversationId and messageId are required' })
+      return res
+        .status(400)
+        .json({ error: 'conversationId and messageId are required' })
     }
 
     // Check if the user is a participant in the conversation
     const isAuthorized = await isUserInConversation(userId, conversationId)
     if (!isAuthorized) {
       return res.status(403).json({
-        error: 'Access denied. You are not a participant in this conversation.'
+        error: 'Access denied. You are not a participant in this conversation.',
       })
     }
 

@@ -17,9 +17,9 @@ router.use('/auth', authRoutes)
 router.use('/conversations', authMiddleware, conversationRoutes)
 
 // Use the media routes
-router.use('/media', mediaRoutes)
+router.use('/media', authMiddleware, mediaRoutes)
 
 // Mount friendship routes
-router.use('/friendships', friendshipRoutes)
+router.use('/friendships', authMiddleware, friendshipRoutes)
 
 module.exports = router

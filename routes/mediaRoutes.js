@@ -1,9 +1,9 @@
 const express = require('express')
-const { generatePresignedUrls } = require('../controllers/mediaController')
+const { generatePresignedUrl } = require('../controllers/mediaController')
 
 const router = express.Router()
 
 // Endpoint to generate pre-signed URLs for uploading media files
-router.post('/presigned-urls', generatePresignedUrls)
+router.post('/presigned-url', generatePresignedUrl)
 
 module.exports = router

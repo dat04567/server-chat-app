@@ -10,7 +10,7 @@ const { authMiddleware } = require('../middleware/authMiddleware')
  * @body    { friendId: string }
  * @returns { message: string, friendship: Object }
  */
-router.post('/request', authMiddleware, friendshipController.sendFriendRequest)
+router.post('/request', friendshipController.sendFriendRequest)
 
 /**
  * @route   DELETE /api/friendships/:friendId/cancel
@@ -19,11 +19,7 @@ router.post('/request', authMiddleware, friendshipController.sendFriendRequest)
  * @params  { friendId: string }
  * @returns { message: string }
  */
-router.delete(
-  '/:friendId/cancel',
-  authMiddleware,
-  friendshipController.cancelFriendRequest
-)
+router.delete('/:friendId/cancel', friendshipController.cancelFriendRequest)
 
 /**
  * @route   PUT /api/friendships/:friendId/accept
@@ -32,11 +28,7 @@ router.delete(
  * @params  { friendId: string }
  * @returns { message: string, friendship: Object }
  */
-router.put(
-  '/:friendId/accept',
-  authMiddleware,
-  friendshipController.acceptFriendRequest
-)
+router.put('/:friendId/accept', friendshipController.acceptFriendRequest)
 
 /**
  * @route   DELETE /api/friendships/:friendId/reject
@@ -45,11 +37,7 @@ router.put(
  * @params  { friendId: string }
  * @returns { message: string }
  */
-router.delete(
-  '/:friendId/reject',
-  authMiddleware,
-  friendshipController.rejectFriendRequest
-)
+router.delete('/:friendId/reject', friendshipController.rejectFriendRequest)
 
 /**
  * @route   DELETE /api/friendships/:friendId/unfriend
@@ -58,11 +46,7 @@ router.delete(
  * @params  { friendId: string }
  * @returns { message: string }
  */
-router.delete(
-  '/:friendId/unfriend',
-  authMiddleware,
-  friendshipController.unfriend
-)
+router.delete('/:friendId/unfriend', friendshipController.unfriend)
 
 /**
  * @route   GET /api/friendships
@@ -70,7 +54,7 @@ router.delete(
  * @access  Authenticated user
  * @returns { friends: Array<{ userId: string, profile: Object }> }
  */
-router.get('/', authMiddleware, friendshipController.listFriends)
+router.get('/', friendshipController.listFriends)
 
 /**
  * @route   GET /api/friendships/received
@@ -78,11 +62,7 @@ router.get('/', authMiddleware, friendshipController.listFriends)
  * @access  Authenticated user
  * @returns { requests: Array<{ userId: string, profile: Object }> }
  */
-router.get(
-  '/received',
-  authMiddleware,
-  friendshipController.listReceivedRequests
-)
+router.get('/received', friendshipController.listReceivedRequests)
 
 /**
  * @route   GET /api/friendships/sent
@@ -90,6 +70,6 @@ router.get(
  * @access  Authenticated user
  * @returns { requests: Array<{ userId: string, profile: Object }> }
  */
-router.get('/sent', authMiddleware, friendshipController.listSentRequests)
+router.get('/sent', friendshipController.listSentRequests)
 
 module.exports = router
