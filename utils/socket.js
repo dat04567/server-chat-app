@@ -81,11 +81,13 @@ module.exports = (io) => {
         // Validate the event data
         if (!participantIds || participantIds.length === 0) {
           return socket.emit('error', {
-            message: 'Invalid conversation data'
+            message: 'Invalid conversation data',
           })
         }
 
-        console.log(`New conversation created, notifying ${participantIds.length} participants...`)
+        console.log(
+          `New conversation created, notifying ${participantIds.length} participants...`
+        )
 
         // Notify all participants about the new conversation
         participantIds.forEach((participantId) => {
@@ -95,7 +97,7 @@ module.exports = (io) => {
       } catch (error) {
         console.error('Error handling new-conversation event:', error)
         socket.emit('error', {
-          message: 'Failed to notify participants about the new conversation'
+          message: 'Failed to notify participants about the new conversation',
         })
       }
     })
@@ -107,13 +109,15 @@ module.exports = (io) => {
         const isParticipant = await isUserInConversation(userId, conversationId)
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'You are not authorized to join this conversation'
+            message: 'You are not authorized to join this conversation',
           })
         }
 
         // Join the user to the conversation-specific room
         socket.join(conversationId)
-        console.log(`User ${userId} joined conversation room: ${conversationId}`)
+        console.log(
+          `User ${userId} joined conversation room: ${conversationId}`
+        )
       } catch (error) {
         console.error('Error handling open-conversation:', error)
         socket.emit('error', { message: 'Failed to join the conversation' })
@@ -129,7 +133,8 @@ module.exports = (io) => {
         const isParticipant = await isUserInConversation(userId, conversationId)
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'You are not authorized to send messages in this conversation'
+            message:
+              'You are not authorized to send messages in this conversation',
           })
         }
 
@@ -137,15 +142,21 @@ module.exports = (io) => {
         const sender = await User.get({ id: userId })
         if (!sender) {
           return socket.emit('error', {
-            message: 'Sender not found'
+            message: 'Sender not found',
           })
         }
 
         // Save the new message and update conversation details
-        const newMessage = await handleNewMessage(conversationId, userId, type, content)
+        const newMessage = await handleNewMessage(
+          conversationId,
+          userId,
+          type,
+          content
+        )
 
         // Add the senderName to the newMessage object
-        newMessage.senderName = `${sender.firstName || ''} ${sender.lastName || ''}`.trim()
+        newMessage.senderName =
+          `${sender.firstName || ''} ${sender.lastName || ''}`.trim()
 
         // Emit the new message to all participants in the conversation
         io.to(conversationId).emit('new-message', newMessage)
@@ -153,19 +164,68 @@ module.exports = (io) => {
         // Emit a conversation update to all the participants in the conversation
         const lastMessageAt = newMessage.createdAt
         const lastMessageText = content
-        const participants = await getParticipantsForConversation(conversationId)
+        const participants =
+          await getParticipantsForConversation(conversationId)
 
         participants.forEach((participant) => {
           const participantRoom = `user:${participant.userId}`
           io.to(participantRoom).emit('conversation-update', {
             conversationId,
             lastMessageText,
-            lastMessageAt
+            lastMessageAt,
           })
         })
       } catch (error) {
         console.error('Error sending message:', error)
         socket.emit('error', { message: error.message })
+      }
+    })
+
+    // RECALL MESSAGE
+    socket.on('recall-message', async ({ messageId, conversationId }) => {
+      try {
+        // Validate if the user is a participant in the conversation
+        const isParticipant = await isUserInConversation(userId, conversationId)
+        if (!isParticipant) {
+          return socket.emit('error', {
+            message:
+              'You are not authorized to recall messages in this conversation',
+          })
+        }
+
+        // Fetch the message from the database
+        const message = await Message.get({ id: messageId })
+
+        // Validate if the message exists
+        if (!message) {
+          return socket.emit('error', { message: 'Message not found' })
+        }
+
+        // Check if the user is the sender of the message
+        if (message.senderId !== userId) {
+          return socket.emit('error', {
+            message: 'You are not authorized to recall this message',
+          })
+        }
+
+        // Update the message status to "RECALLED" and set the updatedAt field
+        await Message.update(
+          { id: messageId },
+          { status: 'RECALLED', updatedAt: new Date().toISOString() }
+        )
+
+        // Notify all participants in the conversation about the recalled message
+        io.to(conversationId).emit('message-recalled', {
+          messageId,
+          conversationId,
+          status: 'RECALLED',
+          updatedAt: new Date().toISOString(),
+        })
+
+        console.log(`Message ${messageId} recalled by user ${userId}`)
+      } catch (error) {
+        console.error('Error recalling message:', error)
+        socket.emit('error', { message: 'Failed to recall the message' })
       }
     })
 
@@ -176,18 +236,18 @@ module.exports = (io) => {
         await ConversationParticipants.update(
           {
             userId,
-            conversationId
+            conversationId,
           },
           {
             unread: false,
-            lastReadAt: new Date().toISOString()
+            lastReadAt: new Date().toISOString(),
           }
         )
         console.log(`User ${userId} closed conversation ${conversationId}`)
       } catch (error) {
         console.error('Error updating conversation participant:', error)
         socket.emit('error', {
-          message: 'Failed to update conversation status'
+          message: 'Failed to update conversation status',
         })
       }
     })
@@ -198,7 +258,9 @@ module.exports = (io) => {
 
       if (userSockets[userId]) {
         // Remove this socket from the active socket list
-        userSockets[userId] = userSockets[userId].filter((id) => id !== socket.id)
+        userSockets[userId] = userSockets[userId].filter(
+          (id) => id !== socket.id
+        )
 
         // If there isn't any socket left
         if (userSockets[userId].length === 0) {
@@ -215,7 +277,12 @@ module.exports = (io) => {
   // Get all participants in a conversation
   async function getParticipantsForConversation(conversationId) {
     try {
-      const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+      const participants = await ConversationParticipants.query(
+        'conversationId'
+      )
+        .using('conversationIdIndex')
+        .eq(conversationId)
+        .exec()
       return participants
     } catch (error) {
       console.error('Error fetching participants for conversation:', error)
@@ -230,7 +297,7 @@ module.exports = (io) => {
         { id: userId },
         {
           status,
-          lastSeen: new Date().toISOString()
+          lastSeen: new Date().toISOString(),
         }
       )
     } catch (error) {
@@ -239,14 +306,19 @@ module.exports = (io) => {
   }
 
   // Process new message
-  async function handleNewMessage(conversationId, senderId, type = 'TEXT', content) {
+  async function handleNewMessage(
+    conversationId,
+    senderId,
+    type = 'TEXT',
+    content
+  ) {
     try {
       // Save the message to the database
       const newMessage = new Message({
         conversationId,
         senderId,
         type,
-        content
+        content,
       })
       const savedMessage = await newMessage.save()
       const lastMessageAt = savedMessage.createdAt
@@ -260,7 +332,12 @@ module.exports = (io) => {
       // console.log('lastMessageAt:', lastMessageAt)
       // console.log('lastMessageText:', lastMessageText)
 
-      if (!lastMessageAt || !lastMessageText || !participants || participants.length === 0) {
+      if (
+        !lastMessageAt ||
+        !lastMessageText ||
+        !participants ||
+        participants.length === 0
+      ) {
         throw new Error('Invalid data for updates: Missing required fields')
       }
 
@@ -269,7 +346,7 @@ module.exports = (io) => {
         { conversationId },
         {
           lastMessageAt,
-          lastMessageText
+          lastMessageText,
         }
       )
 
@@ -281,25 +358,32 @@ module.exports = (io) => {
         }
 
         const updates = {
-          lastMessageAt
+          lastMessageAt,
         }
 
         // If the participant is not the sender and the new message is later than lastReadAt, set unread to true
-        if (participant.userId !== senderId && !participant.unread && new Date(lastMessageAt) > new Date(participant.lastReadAt)) {
+        if (
+          participant.userId !== senderId &&
+          !participant.unread &&
+          new Date(lastMessageAt) > new Date(participant.lastReadAt)
+        ) {
           updates.unread = true
         }
 
         return ConversationParticipants.update(
           {
             userId: participant.userId,
-            conversationId: participant.conversationId
+            conversationId: participant.conversationId,
           },
           updates
         )
       })
 
       // Execute all updates in parallel
-      await Promise.all([updateConversationPromise, ...updateParticipantsPromises])
+      await Promise.all([
+        updateConversationPromise,
+        ...updateParticipantsPromises,
+      ])
 
       return savedMessage
     } catch (error) {
