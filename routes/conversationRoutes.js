@@ -10,11 +10,25 @@ const {
   removeMember,
   updateMemberRole,
   deleteConversation,
-  leaveGroup
+  leaveGroup,
+  searchOneToOneConversation,
 } = require('../controllers/conversationController')
-const { getMessagesForConversation, sendMessage, getMessageById } = require('../controllers/messageController')
+const {
+  getMessagesForConversation,
+  sendMessage,
+  getMessageById,
+} = require('../controllers/messageController')
 
 const router = express.Router()
+
+/**
+ * @route   GET /api/conversations/one-to-one/search
+ * @desc    Search for a ONE-TO-ONE conversation with a target user
+ * @access  Authenticated user
+ * @query   { targetUser: string }
+ * @returns { conversation: object }
+ */
+router.get('/one-to-one/search', searchOneToOneConversation)
 
 /**
  * @route   POST /api/conversations/one-to-one

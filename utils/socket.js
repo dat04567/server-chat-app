@@ -81,11 +81,13 @@ module.exports = (io) => {
         // Validate the event data
         if (!participantIds || participantIds.length === 0) {
           return socket.emit('error', {
-            message: 'Invalid conversation data'
+            message: 'Invalid conversation data',
           })
         }
 
-        console.log(`New conversation created, notifying ${participantIds.length} participants...`)
+        console.log(
+          `New conversation created, notifying ${participantIds.length} participants...`
+        )
 
         // Notify all participants about the new conversation
         participantIds.forEach((participantId) => {
@@ -95,7 +97,7 @@ module.exports = (io) => {
       } catch (error) {
         console.error('Error handling new-conversation event:', error)
         socket.emit('error', {
-          message: 'Failed to notify participants about the new conversation'
+          message: 'Failed to notify participants about the new conversation',
         })
       }
     })
@@ -107,13 +109,15 @@ module.exports = (io) => {
         const isParticipant = await isUserInConversation(userId, conversationId)
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'You are not authorized to join this conversation'
+            message: 'You are not authorized to join this conversation',
           })
         }
 
         // Join the user to the conversation-specific room
         socket.join(conversationId)
-        console.log(`User ${userId} joined conversation room: ${conversationId}`)
+        console.log(
+          `User ${userId} joined conversation room: ${conversationId}`
+        )
       } catch (error) {
         console.error('Error handling open-conversation:', error)
         socket.emit('error', { message: 'Failed to join the conversation' })
@@ -123,13 +127,14 @@ module.exports = (io) => {
     // SEND MESSAGE
     socket.on('send-message', async (messageObject) => {
       try {
-        const { conversationId, type = 'TEXT', content } = messageObject
+        let { conversationId, type = 'TEXT', content } = messageObject
 
         // Check if the user is a participant in the conversation
         const isParticipant = await isUserInConversation(userId, conversationId)
         if (!isParticipant) {
           return socket.emit('error', {
-            message: 'You are not authorized to send messages in this conversation'
+            message:
+              'You are not authorized to send messages in this conversation',
           })
         }
 
@@ -137,30 +142,44 @@ module.exports = (io) => {
         const sender = await User.get({ id: userId })
         if (!sender) {
           return socket.emit('error', {
-            message: 'Sender not found'
+            message: 'Sender not found',
           })
         }
 
+        // For MEDIA messages, construct the full S3 URL and save it in content
+        if (type === 'MEDIA' && content) {
+          content = getMediaUrl(content)
+        }
+
         // Save the new message and update conversation details
-        const newMessage = await handleNewMessage(conversationId, userId, type, content)
+        const newMessage = await handleNewMessage(
+          conversationId,
+          userId,
+          type,
+          content
+        )
+
+        console.log('sender:', sender)
 
         // Add the senderName to the newMessage object
-        newMessage.senderName = `${sender.firstName || ''} ${sender.lastName || ''}`.trim()
+        newMessage.senderName =
+          `${sender.profile.firstName || ''} ${sender.profile.lastName || ''}`.trim()
 
         // Emit the new message to all participants in the conversation
         io.to(conversationId).emit('new-message', newMessage)
 
         // Emit a conversation update to all the participants in the conversation
         const lastMessageAt = newMessage.createdAt
-        const lastMessageText = content
-        const participants = await getParticipantsForConversation(conversationId)
+        const lastMessageText = type === 'MEDIA' ? '[Media]' : content
+        const participants =
+          await getParticipantsForConversation(conversationId)
 
         participants.forEach((participant) => {
           const participantRoom = `user:${participant.userId}`
           io.to(participantRoom).emit('conversation-update', {
             conversationId,
             lastMessageText,
-            lastMessageAt
+            lastMessageAt,
           })
         })
       } catch (error) {
@@ -176,18 +195,18 @@ module.exports = (io) => {
         await ConversationParticipants.update(
           {
             userId,
-            conversationId
+            conversationId,
           },
           {
             unread: false,
-            lastReadAt: new Date().toISOString()
+            lastReadAt: new Date().toISOString(),
           }
         )
         console.log(`User ${userId} closed conversation ${conversationId}`)
       } catch (error) {
         console.error('Error updating conversation participant:', error)
         socket.emit('error', {
-          message: 'Failed to update conversation status'
+          message: 'Failed to update conversation status',
         })
       }
     })
@@ -198,7 +217,9 @@ module.exports = (io) => {
 
       if (userSockets[userId]) {
         // Remove this socket from the active socket list
-        userSockets[userId] = userSockets[userId].filter((id) => id !== socket.id)
+        userSockets[userId] = userSockets[userId].filter(
+          (id) => id !== socket.id
+        )
 
         // If there isn't any socket left
         if (userSockets[userId].length === 0) {
@@ -215,7 +236,12 @@ module.exports = (io) => {
   // Get all participants in a conversation
   async function getParticipantsForConversation(conversationId) {
     try {
-      const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+      const participants = await ConversationParticipants.query(
+        'conversationId'
+      )
+        .using('conversationIdIndex')
+        .eq(conversationId)
+        .exec()
       return participants
     } catch (error) {
       console.error('Error fetching participants for conversation:', error)
@@ -230,7 +256,7 @@ module.exports = (io) => {
         { id: userId },
         {
           status,
-          lastSeen: new Date().toISOString()
+          lastSeen: new Date().toISOString(),
         }
       )
     } catch (error) {
@@ -239,14 +265,19 @@ module.exports = (io) => {
   }
 
   // Process new message
-  async function handleNewMessage(conversationId, senderId, type = 'TEXT', content) {
+  async function handleNewMessage(
+    conversationId,
+    senderId,
+    type = 'TEXT',
+    content
+  ) {
     try {
       // Save the message to the database
       const newMessage = new Message({
         conversationId,
         senderId,
         type,
-        content
+        content,
       })
       const savedMessage = await newMessage.save()
       const lastMessageAt = savedMessage.createdAt
@@ -260,7 +291,12 @@ module.exports = (io) => {
       // console.log('lastMessageAt:', lastMessageAt)
       // console.log('lastMessageText:', lastMessageText)
 
-      if (!lastMessageAt || !lastMessageText || !participants || participants.length === 0) {
+      if (
+        !lastMessageAt ||
+        !lastMessageText ||
+        !participants ||
+        participants.length === 0
+      ) {
         throw new Error('Invalid data for updates: Missing required fields')
       }
 
@@ -269,7 +305,7 @@ module.exports = (io) => {
         { conversationId },
         {
           lastMessageAt,
-          lastMessageText
+          lastMessageText,
         }
       )
 
@@ -281,30 +317,43 @@ module.exports = (io) => {
         }
 
         const updates = {
-          lastMessageAt
+          lastMessageAt,
         }
 
         // If the participant is not the sender and the new message is later than lastReadAt, set unread to true
-        if (participant.userId !== senderId && !participant.unread && new Date(lastMessageAt) > new Date(participant.lastReadAt)) {
+        if (
+          participant.userId !== senderId &&
+          !participant.unread &&
+          new Date(lastMessageAt) > new Date(participant.lastReadAt)
+        ) {
           updates.unread = true
         }
 
         return ConversationParticipants.update(
           {
             userId: participant.userId,
-            conversationId: participant.conversationId
+            conversationId: participant.conversationId,
           },
           updates
         )
       })
 
       // Execute all updates in parallel
-      await Promise.all([updateConversationPromise, ...updateParticipantsPromises])
+      await Promise.all([
+        updateConversationPromise,
+        ...updateParticipantsPromises,
+      ])
 
       return savedMessage
     } catch (error) {
       console.error('Error handling new message:', error)
       throw new Error('Failed to process the new message')
     }
+  }
+
+  // Helper to construct S3 media URL
+  function getMediaUrl(key) {
+    // Replace with your actual S3 bucket URL or use an environment variable
+    return `${process.env.S3_PUBLIC_URL}/${key}`
   }
 }

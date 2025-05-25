@@ -15,6 +15,10 @@ exports.generatePresignedUrl = async (req, res) => {
   try {
     const { fileName, fileType } = req.body
 
+    console.log(
+      `got here brother media with fileName: ${fileName} and fileType: ${fileType}`
+    )
+
     if (!fileName || !fileType) {
       return res
         .status(400)
@@ -23,7 +27,7 @@ exports.generatePresignedUrl = async (req, res) => {
 
     // Allowed MIME types for images, videos, and documents
     const allowedMimeTypes = {
-      images: ['image/jpeg', 'image/png', 'image/gif'],
+      images: ['image/jpg', 'image/png', 'image/gif'],
       videos: ['video/mp4', 'video/mpeg'],
       documents: [
         'application/pdf',
@@ -59,7 +63,7 @@ exports.generatePresignedUrl = async (req, res) => {
     // Use the authenticated user's ID to organize files
     const userId = req.user.id
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const uniqueFileName = `${folder}/${userId}/${uuidv4()}_${sanitizedFileName}`
+    const uniqueFileName = `${userId}/${folder}/${uuidv4()}_${sanitizedFileName}`
 
     // Log user activity
     console.log(

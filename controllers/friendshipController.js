@@ -31,7 +31,7 @@ exports.sendFriendRequest = async (req, res) => {
     const existingFriendship = await Friendship.get({ userId, friendId })
     if (existingFriendship) {
       return res.status(400).json({
-        error: 'Friendship already exists (either accepted or pending).'
+        error: 'Friendship already exists (either accepted or pending).',
       })
     }
 
@@ -45,7 +45,7 @@ exports.sendFriendRequest = async (req, res) => {
       initiatorId: userId,
       status: 'PENDING',
       createdAt: timestamp,
-      updatedAt: timestamp
+      updatedAt: timestamp,
     })
 
     const friendship2 = new Friendship({
@@ -54,7 +54,7 @@ exports.sendFriendRequest = async (req, res) => {
       initiatorId: userId,
       status: 'PENDING',
       createdAt: timestamp,
-      updatedAt: timestamp
+      updatedAt: timestamp,
     })
 
     // Perform batch write
@@ -62,7 +62,7 @@ exports.sendFriendRequest = async (req, res) => {
 
     res.status(201).json({
       message: 'Friend request sent successfully.',
-      friendship: friendship1
+      friendship: friendship1,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -87,7 +87,7 @@ exports.acceptFriendRequest = async (req, res) => {
     if (!friendship || friendship.status !== 'PENDING') {
       return res.status(404).json({
         message: 'Friend request not found or already processed.',
-        data: null
+        data: null,
       })
     }
 
@@ -95,7 +95,7 @@ exports.acceptFriendRequest = async (req, res) => {
     if (friendship.initiatorId === userId) {
       return res.status(403).json({
         message: 'You cannot accept a friend request you sent.',
-        data: null
+        data: null,
       })
     }
 
@@ -107,7 +107,7 @@ exports.acceptFriendRequest = async (req, res) => {
     // Update the reverse entry as well
     const reverseFriendship = await Friendship.get({
       userId: friendId,
-      friendId: userId
+      friendId: userId,
     })
     if (reverseFriendship) {
       reverseFriendship.status = 'ACCEPTED'
@@ -117,7 +117,7 @@ exports.acceptFriendRequest = async (req, res) => {
 
     res.status(200).json({
       message: 'Friend request accepted successfully.',
-      friendship
+      friendship,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -146,14 +146,14 @@ exports.listFriends = async (req, res) => {
         const friend = await User.get(friendId)
         return {
           userId: friend.id,
-          profile: friend.profile
+          profile: friend.profile,
         }
       })
     )
 
     res.status(200).json({
       message: 'Friends retrieved successfully.',
-      friends
+      friends,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -184,14 +184,14 @@ exports.listSentRequests = async (req, res) => {
         return {
           userId: friend.id,
           profile: friend.profile,
-          createdAt: request.createdAt // Include the createdAt field
+          createdAt: request.createdAt, // Include the createdAt field
         }
       })
     )
 
     res.status(200).json({
       message: 'Sent friend requests retrieved successfully.',
-      requests
+      requests,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -222,14 +222,14 @@ exports.listReceivedRequests = async (req, res) => {
         return {
           userId: friend.id,
           profile: friend.profile,
-          createdAt: request.createdAt // Include the createdAt field
+          createdAt: request.createdAt, // Include the createdAt field
         }
       })
     )
 
     res.status(200).json({
       message: 'Received friend requests retrieved successfully.',
-      requests
+      requests,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -258,7 +258,7 @@ exports.cancelFriendRequest = async (req, res) => {
     ) {
       return res.status(403).json({
         message: 'You can only cancel your own pending friend requests.',
-        data: null
+        data: null,
       })
     }
 
@@ -267,7 +267,7 @@ exports.cancelFriendRequest = async (req, res) => {
 
     res.status(200).json({
       message: 'Friend request canceled successfully.',
-      data: null
+      data: null,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -296,7 +296,7 @@ exports.rejectFriendRequest = async (req, res) => {
     ) {
       return res.status(403).json({
         message: 'You can only reject friend requests sent to you.',
-        data: null
+        data: null,
       })
     }
 
@@ -305,7 +305,7 @@ exports.rejectFriendRequest = async (req, res) => {
 
     res.status(200).json({
       message: 'Friend request rejected successfully.',
-      data: null
+      data: null,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -338,7 +338,7 @@ exports.unfriend = async (req, res) => {
 
     res.status(200).json({
       message: 'Friendship removed successfully.',
-      data: null
+      data: null,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -371,7 +371,7 @@ exports.isFriend = async (userId, friendId) => {
     }
     const reverseFriendship = await Friendship.get({
       userId: friendId,
-      friendId: userId
+      friendId: userId,
     })
     if (reverseFriendship && reverseFriendship.status === 'ACCEPTED') {
       return true
@@ -380,5 +380,37 @@ exports.isFriend = async (userId, friendId) => {
   } catch (error) {
     console.error('Error checking friendship:', error)
     return false
+  }
+}
+
+/**
+ * API endpoint to check if a user is a friend of the current user
+ */
+exports.checkFriendStatus = async (req, res) => {
+  try {
+    const userId = req.user.id // Extracted from JWT middleware
+    const { friendId } = req.params
+
+    if (!friendId) {
+      return res.status(400).json({ message: 'friendId is required.' })
+    }
+
+    // Try to find the friendship entry
+    const friendship = await Friendship.get({ userId, friendId })
+    if (!friendship) {
+      return res.status(404).json({ message: 'No relationship found.' })
+    }
+
+    // Only allow PENDING or ACCEPTED
+    if (!['PENDING', 'ACCEPTED'].includes(friendship.status)) {
+      return res.status(404).json({ message: 'No relationship found.' })
+    }
+
+    res.status(200).json({
+      status: friendship.status,
+      isInitiator: friendship.initiatorId === userId,
+    })
+  } catch (error) {
+    handleError(error, req, res)
   }
 }

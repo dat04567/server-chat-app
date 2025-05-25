@@ -72,4 +72,13 @@ router.get('/received', friendshipController.listReceivedRequests)
  */
 router.get('/sent', friendshipController.listSentRequests)
 
+/**
+ * @route   GET /api/friendships/:friendId/status
+ * @desc    Get the relationship status (PENDING or ACCEPTED) and whether the authenticated user is the initiator
+ * @access  Authenticated user
+ * @params  { friendId: string }
+ * @returns { status: 'PENDING' | 'ACCEPTED', isInitiator: boolean }
+ */
+router.get('/:friendId/status', friendshipController.checkFriendStatus)
+
 module.exports = router

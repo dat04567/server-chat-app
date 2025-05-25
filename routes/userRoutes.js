@@ -1,9 +1,25 @@
 const express = require('express')
 const router = express.Router()
 const userController = require('../controllers/userController')
-const { createUserValidation, updateUserValidation, userIdValidation, checkValidation } = require('../utils/validators')
-const { authMiddleware, adminMiddleware } = require('../middleware/authMiddleware')
+const {
+  createUserValidation,
+  updateUserValidation,
+  userIdValidation,
+  checkValidation,
+} = require('../utils/validators')
+const {
+  authMiddleware,
+  adminMiddleware,
+} = require('../middleware/authMiddleware')
 const { getOwnUserInfo } = require('../controllers/userController')
+const upload = require('../utils/uploadMemory') // Add this import at the top
+
+/**
+ * @route   GET /api/users/own
+ * @desc    Get the authenticated user's own information
+ * @access  Authenticated user
+ */
+router.get('/own', authMiddleware, getOwnUserInfo)
 
 // @route   GET /api/users
 // @desc    Lấy tất cả người dùng
@@ -18,28 +34,60 @@ router.get('/search', authMiddleware, userController.searchUsersByName)
 // @route   GET /api/users/:id
 // @desc    Lấy thông tin người dùng theo ID
 // @access  Admin hoặc chính người dùng đó
-router.get('/:id', authMiddleware, userIdValidation, checkValidation, userController.getUserById)
+router.get(
+  '/:id',
+  authMiddleware,
+  userIdValidation,
+  checkValidation,
+  userController.getUserById
+)
 
 // @route   POST /api/users
 // @desc    Tạo người dùng mới (chỉ admin)
 // @access  Admin
-router.post('/', authMiddleware, adminMiddleware, createUserValidation, checkValidation, userController.createUser)
+router.post(
+  '/',
+  authMiddleware,
+  adminMiddleware,
+  createUserValidation,
+  checkValidation,
+  userController.createUser
+)
 
 // @route   PUT /api/users/:id
 // @desc    Cập nhật thông tin người dùng
 // @access  Admin hoặc chính người dùng đó
-router.put('/:id', authMiddleware, updateUserValidation, checkValidation, userController.updateUser)
+router.put(
+  '/:id',
+  authMiddleware,
+  updateUserValidation,
+  checkValidation,
+  userController.updateUser
+)
+
+/**
+ * @route   PATCH /api/users/profile
+ * @desc    Update authenticated user's profile (phone, firstName, lastName, bio, avatar)
+ * @access  Authenticated user
+ * @form    avatar: image file (multipart/form-data)
+ */
+router.patch(
+  '/profile',
+  authMiddleware,
+  upload.single('avatar'),
+  userController.updateOwnProfile
+)
 
 // @route   DELETE /api/users/:id
 // @desc    Xóa người dùng
 // @access  Admin
-router.delete('/:id', authMiddleware, adminMiddleware, userIdValidation, checkValidation, userController.deleteUser)
-
-/**
- * @route   GET /api/users/own
- * @desc    Get the authenticated user's own information
- * @access  Authenticated user
- */
-router.get('/own', authMiddleware, getOwnUserInfo)
+router.delete(
+  '/:id',
+  authMiddleware,
+  adminMiddleware,
+  userIdValidation,
+  checkValidation,
+  userController.deleteUser
+)
 
 module.exports = router

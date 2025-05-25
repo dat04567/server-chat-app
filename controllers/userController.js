@@ -1,8 +1,18 @@
 const User = require('../models/userModel')
 const { v4: uuidv4 } = require('uuid')
 const bcrypt = require('bcrypt')
-const { generateVerificationCode, sendVerificationEmail } = require('../utils/emailService')
+const {
+  generateVerificationCode,
+  sendVerificationEmail,
+} = require('../utils/emailService')
 const { handleError } = require('../utils')
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} = require('@aws-sdk/client-s3')
+const path = require('path')
+const s3 = new S3Client({ region: process.env.AWS_REGION })
 
 // Get all users
 exports.getAllUsers = async (req, res) => {
@@ -12,7 +22,7 @@ exports.getAllUsers = async (req, res) => {
     res.status(200).json({
       success: true,
       count: users.length,
-      data: users
+      data: users,
     })
   } catch (error) {
     error.message = 'Failed to fetch users'
@@ -28,13 +38,13 @@ exports.getUserById = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
       })
     }
 
     res.status(200).json({
       success: true,
-      data: user
+      data: user,
     })
   } catch (error) {
     handleError(error, req, res)
@@ -50,7 +60,7 @@ exports.searchUsersByName = async (req, res) => {
     if (!name) {
       return res.status(400).json({
         success: false,
-        error: 'Vui lòng cung cấp tham số tìm kiếm (name)'
+        error: 'Vui lòng cung cấp tham số tìm kiếm (name)',
       })
     }
 
@@ -72,13 +82,13 @@ exports.searchUsersByName = async (req, res) => {
       username: user.username,
       profile: user.profile,
       status: user.status,
-      lastSeen: user.lastSeen
+      lastSeen: user.lastSeen,
     }))
 
     res.status(200).json({
       success: true,
       count: filteredUsers.length,
-      data: filteredUsers
+      data: filteredUsers,
     })
   } catch (error) {
     error.message = 'Không thể tìm kiếm người dùng'
@@ -93,7 +103,7 @@ exports.createUser = async (req, res) => {
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
-        error: 'Không có quyền tạo người dùng'
+        error: 'Không có quyền tạo người dùng',
       })
     }
 
@@ -116,7 +126,7 @@ exports.createUser = async (req, res) => {
       verificationExpires: !req.body.isVerified ? verificationExpires : null,
       createAt: new Date().toISOString(),
       updateAt: new Date().toISOString(),
-      lastActive: new Date().toISOString()
+      lastActive: new Date().toISOString(),
     }
 
     const user = await User.create(userData)
@@ -138,12 +148,13 @@ exports.createUser = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
-        isVerified: user.isVerified
-      }
+        isVerified: user.isVerified,
+      },
     })
   } catch (error) {
     error.statusCode = 400
-    error.message = 'Thất bại khi tạo tài khoản. Vui lòng kiểm tra lại thông tin.'
+    error.message =
+      'Thất bại khi tạo tài khoản. Vui lòng kiểm tra lại thông tin.'
     handleError(error, req, res)
   }
 }
@@ -157,7 +168,7 @@ exports.updateUser = async (req, res) => {
     if (!existingUser) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
       })
     }
 
@@ -166,14 +177,14 @@ exports.updateUser = async (req, res) => {
     if (req.user.role !== 'admin' && req.user.id !== req.params.id) {
       return res.status(403).json({
         success: false,
-        error: 'Không có quyền cập nhật thông tin người dùng này'
+        error: 'Không có quyền cập nhật thông tin người dùng này',
       })
     }
 
     // Chuẩn bị dữ liệu cập nhật
     const userData = {
       ...req.body,
-      updateAt: new Date().toISOString()
+      updateAt: new Date().toISOString(),
     }
 
     // Nếu có thay đổi mật khẩu, hash mật khẩu mới
@@ -184,7 +195,7 @@ exports.updateUser = async (req, res) => {
 
     const user = await User.update({
       id: req.params.id,
-      ...userData
+      ...userData,
     })
 
     res.status(200).json({
@@ -195,8 +206,8 @@ exports.updateUser = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
-        isVerified: user.isVerified
-      }
+        isVerified: user.isVerified,
+      },
     })
   } catch (error) {
     error.statusCode = 400
@@ -214,7 +225,7 @@ exports.deleteUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
       })
     }
 
@@ -222,12 +233,12 @@ exports.deleteUser = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: {}
+      data: {},
     })
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     })
   }
 }
@@ -236,7 +247,6 @@ exports.deleteUser = async (req, res) => {
  * Get the authenticated user's own information
  */
 exports.getOwnUserInfo = async (req, res) => {
-  console.log(`git hereeee`)
   try {
     const userId = req.user.id // Extract the authenticated user's ID from the auth middleware
     // Fetch the user from the database
@@ -245,23 +255,118 @@ exports.getOwnUserInfo = async (req, res) => {
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
       })
     }
 
-    // Return only the necessary fields (e.g., id and profile)
+    // Return the necessary fields
     res.status(200).json({
       success: true,
       user: {
         id: user.id,
-        profile: user.profile // Assuming the User schema has a "profile" field
-      }
+        username: user.username,
+        email: user.email,
+        isVerified: user.isVerified,
+        createAt: user.createAt,
+        updateAt: user.updateAt,
+        profile: user.profile,
+        bio: user.bio,
+      },
     })
   } catch (error) {
     console.error('Error fetching user info:', error)
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch user information'
+      error: 'Failed to fetch user information',
     })
+  }
+}
+
+/**
+ * Update the authenticated user's own profile
+ */
+exports.updateOwnProfile = async (req, res) => {
+  try {
+    const userId = req.user.id
+    const existingUser = await User.get(userId)
+
+    if (!existingUser) {
+      return res.status(404).json({ success: false, error: 'User not found' })
+    }
+
+    let avatarUrl = existingUser.profile?.avatar
+
+    // Handle avatar upload
+    if (req.file) {
+      // Remove old avatar if exists
+      if (avatarUrl) {
+        const oldKey = avatarUrl.split('.amazonaws.com/')[1]
+        if (oldKey) {
+          try {
+            await s3.send(
+              new DeleteObjectCommand({
+                Bucket: process.env.AWS_S3_BUCKET_NAME,
+                Key: oldKey,
+              })
+            )
+          } catch (err) {
+            console.warn('Failed to delete old avatar:', err.message)
+          }
+        }
+      }
+
+      // Upload new avatar
+      const ext = path.extname(req.file.originalname)
+      const fileName = `avatar_${Date.now()}${ext}`
+      const key = `${userId}/avatar/${fileName}`
+
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET_NAME,
+          Key: key,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+          // ACL: 'public-read',
+        })
+      )
+
+      avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+    }
+
+    // Only allow updating these fields
+    const { phone, firstName, lastName } = req.body
+    const bio = req.body.bio
+
+    const updateData = {
+      updateAt: new Date().toISOString(),
+      bio: typeof bio === 'string' ? bio : existingUser.bio,
+      profile: {
+        ...existingUser.profile,
+        phone: typeof phone === 'string' ? phone : existingUser.profile.phone,
+        firstName:
+          typeof firstName === 'string' ? firstName : (
+            existingUser.profile.firstName
+          ),
+        lastName:
+          typeof lastName === 'string' ? lastName : (
+            existingUser.profile.lastName
+          ),
+        avatar: avatarUrl,
+      },
+    }
+
+    const user = await User.update({ id: userId, ...updateData })
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        id: user.id,
+        profile: user.profile,
+        bio: user.bio,
+      },
+    })
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message })
   }
 }
