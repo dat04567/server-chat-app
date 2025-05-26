@@ -11,7 +11,9 @@ const {
   updateMemberRole,
   deleteConversation,
   leaveGroup,
-  searchOneToOneConversation
+  searchOneToOneConversation,
+  getParticipantsForConversation,
+  updateGroupConversation
 } = require('../controllers/conversationController')
 const { getMessagesForConversation, sendMessage, getMessageById, getMediaMessagesForConversation } = require('../controllers/messageController')
 const upload = require('../utils/uploadMemory')
@@ -193,5 +195,22 @@ router.delete('/:conversationId', deleteConversation)
  * @returns { message: string }
  */
 router.delete('/:conversationId/leave', leaveGroup)
+
+/**
+ * @route   GET /api/conversations/:conversationId/participants
+ * @desc    Get all participants of a conversation
+ * @access  Authenticated user
+ */
+router.get('/:conversationId/participants', getParticipantsForConversation)
+
+/**
+ * @route   PATCH /api/conversations/:conversationId
+ * @desc    Update groupName and/or groupImage for a group conversation
+ * @access  Authenticated user (admin or creator)
+ * @params  { conversationId: string }
+ * @body    { groupName?: string }
+ * @form    groupImage: file (optional, image file)
+ */
+router.patch('/:conversationId', upload.single('groupImage'), updateGroupConversation)
 
 module.exports = router

@@ -6,7 +6,7 @@ const { isUserInConversation } = require('../utils/authorization')
 const Friendship = require('../models/friendshipModel')
 const { handleError } = require('../utils')
 const { v4: uuidv4 } = require('uuid')
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3')
 const path = require('path')
 const s3 = new S3Client({ region: process.env.AWS_REGION })
 
@@ -869,4 +869,106 @@ exports.searchOneToOneConversation = async (req, res) => {
 const extractRecipientId = (participantPairKey, currentUserId) => {
   const [id1, id2] = participantPairKey.split('#') // Split the key into two IDs
   return id1 === currentUserId ? id2 : id1 // Return the ID that is not the current user's ID
+}
+
+/**
+ * Get all participants of a conversation
+ */
+exports.getParticipantsForConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params
+
+    // Optionally, check if the requester is a participant
+    const userId = req.user.id
+    const isAuthorized = await isUserInConversation(userId, conversationId)
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Access denied.' })
+    }
+
+    const participants = await ConversationParticipants.query('conversationId').eq(conversationId).using('conversationIdIndex').exec()
+
+    // Return only userId list
+    const userIds = participants.map((participant) => participant.userId)
+
+    res.status(200).json({ participantIds: userIds })
+  } catch (error) {
+    console.error('Error fetching participants:', error)
+    res.status(500).json({ error: 'Failed to fetch participants' })
+  }
+}
+
+/**
+ * Update a group's conversation details (name, image)
+ */
+exports.updateGroupConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params
+    const userId = req.user.id
+    const { groupName } = req.body
+
+    // Fetch the conversation
+    const conversation = await Conversation.get({ conversationId })
+    if (!conversation || conversation.type !== 'GROUP') {
+      return res.status(400).json({ error: 'Invalid group conversation' })
+    }
+
+    // Only the creator or an admin can update group info
+    const participant = await ConversationParticipants.get({ userId, conversationId })
+    if (!participant || (!participant.isAdmin && conversation.creatorId !== userId)) {
+      return res.status(403).json({ error: 'You are not authorized to update this group' })
+    }
+
+    let groupImageUrl = conversation.groupImage
+    if (req.file) {
+      // Remove old group image if it exists and is not the default
+      if (
+        groupImageUrl &&
+        !groupImageUrl.includes('default image group url') // Adjust this check if your default URL is different
+      ) {
+        // Extract the key from the URL
+        const url = new URL(groupImageUrl)
+        // Remove the leading slash from pathname
+        const oldKey = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname
+
+        await s3.send(
+          new DeleteObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME,
+            Key: oldKey
+          })
+        )
+      }
+
+      // Handle group image upload
+      const ext = require('path').extname(req.file.originalname)
+      const fileName = `group_${Date.now()}${ext}`
+      const key = `groups/${userId}/${fileName}`
+
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET_NAME,
+          Key: key,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype
+        })
+      )
+
+      groupImageUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+    }
+
+    // Prepare update object
+    const updateObj = {}
+    if (groupName) updateObj.groupName = groupName
+    if (req.file) updateObj.groupImage = groupImageUrl
+
+    if (Object.keys(updateObj).length === 0) {
+      return res.status(400).json({ error: 'No update fields provided.' })
+    }
+
+    await Conversation.update({ conversationId }, updateObj)
+
+    res.status(200).json({ message: 'Group conversation updated successfully', ...updateObj })
+  } catch (error) {
+    console.error('Error updating group conversation:', error)
+    res.status(500).json({ error: 'Failed to update group conversation' })
+  }
 }
