@@ -11,13 +11,10 @@ const {
   updateMemberRole,
   deleteConversation,
   leaveGroup,
-  searchOneToOneConversation,
+  searchOneToOneConversation
 } = require('../controllers/conversationController')
-const {
-  getMessagesForConversation,
-  sendMessage,
-  getMessageById,
-} = require('../controllers/messageController')
+const { getMessagesForConversation, sendMessage, getMessageById, getMediaMessagesForConversation } = require('../controllers/messageController')
+const upload = require('../utils/uploadMemory')
 
 const router = express.Router()
 
@@ -42,9 +39,10 @@ router.post('/one-to-one', createOneToOneConversation)
 
 /**
  * @route   POST /api/conversations/group
- * @desc    Create a GROUP conversation with an initial message
+ * @desc    Create a GROUP conversation with an initial message and optional group image
  * @access  Authenticated user
- * @body    { participantIds: string[], groupName?: string, groupImage?: string }
+ * @body    { participantIds: string[], groupName?: string }
+ * @form    groupImage: file (optional, image file)
  * @returns {
  *   message: string,
  *   conversation: object,
@@ -52,7 +50,11 @@ router.post('/one-to-one', createOneToOneConversation)
  *   initialMessage: object
  * }
  */
-router.post('/group', createGroupConversation)
+router.post(
+  '/group',
+  upload.single('groupImage'), // Accept a single file named 'groupImage'
+  createGroupConversation
+)
 
 /**
  * @route   GET /api/conversations/
@@ -106,6 +108,20 @@ router.post('/:conversationId/messages', sendMessage)
  * @returns { message: object }
  */
 router.get('/:conversationId/messages/:messageId', getMessageById)
+
+/**
+ * @route   GET /api/conversations/:conversationId/media
+ * @desc    Get only media messages (type: MEDIA) for a specific conversation, with pagination (latest to oldest).
+ *          Each media message will only include the content field (media URL) unless more fields are needed.
+ * @access  Authenticated user
+ * @params  { conversationId: string }
+ * @query   { limit?: number, lastMessageId?: string }
+ * @returns {
+ *   messages: Array<{ content: string }>,
+ *   lastMessageId: string | null
+ * }
+ */
+router.get('/:conversationId/media', getMediaMessagesForConversation)
 
 /**
  * @route   POST /api/conversations/:conversationId/invite

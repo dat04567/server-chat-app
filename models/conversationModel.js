@@ -61,6 +61,11 @@ const conversationSchema = new dynamoose.Schema({
   lastMessageText: {
     type: String
   },
+  lastMessageType: {
+    type: String,
+    enum: ['TEXT', 'MEDIA'],
+    default: 'TEXT'
+  },
   lastMessageAt: {
     type: String
   },
