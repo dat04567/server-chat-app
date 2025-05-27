@@ -668,60 +668,29 @@ exports.deleteConversation = async (req, res) => {
     const { conversationId } = req.params
     const userId = req.user.id
 
-    // Fetch the conversation
+    // Fetch conversation
     const conversation = await Conversation.get({ conversationId })
-
-    if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' })
+    if (!conversation || conversation.type !== 'GROUP') {
+      return res.status(400).json({ error: 'Invalid group conversation' })
     }
 
-    // Check if the user is the creator of the conversation
+    // Only the creator can delete
     if (conversation.creatorId !== userId) {
-      return res.status(403).json({ error: 'You are not authorized to delete this conversation' })
+      return res.status(403).json({ error: 'Only the creator can delete this group.' })
     }
 
-    // Check if the creator has already left the group
-    if (conversation.creatorLeft) {
-      return res.status(403).json({
-        error: 'You cannot delete the conversation after leaving the group'
-      })
-    }
+    // Set isDeleted to true
+    await Conversation.update({ conversationId }, { isDeleted: true })
 
-    // Delete all participants in the conversation
-    const participants = await ConversationParticipants.query('conversationId').eq(conversationId).using('conversationIdIndex').exec()
+    // Remove all participants
+    const participants = await ConversationParticipants.query('conversationId').using('conversationIdIndex').eq(conversationId).exec()
+    const removePromises = participants.map((participant) => ConversationParticipants.delete({ userId: participant.userId, conversationId }))
+    await Promise.all(removePromises)
 
-    if (participants.length > 0) {
-      await Promise.all(
-        participants.map((participant) =>
-          ConversationParticipants.delete({
-            userId: participant.userId,
-            conversationId
-          })
-        )
-      )
-    }
-
-    // Delete all messages in the conversation
-    const messages = await Message.query('conversationId').eq(conversationId).exec()
-
-    if (messages.length > 0) {
-      await Promise.all(
-        messages.map((message) =>
-          Message.delete({
-            conversationId,
-            messageId: message.messageId
-          })
-        )
-      )
-    }
-
-    // Delete the conversation itself
-    await Conversation.delete({ conversationId })
-
-    res.status(200).json({ message: 'Conversation deleted successfully' })
+    return res.status(200).json({ message: 'Group deleted successfully', conversationId })
   } catch (error) {
-    console.error('Error deleting conversation:', error)
-    res.status(500).json({ error: 'Failed to delete conversation' })
+    console.error('Error deleting group:', error)
+    res.status(500).json({ error: 'Failed to delete group.' })
   }
 }
 
@@ -731,94 +700,42 @@ exports.deleteConversation = async (req, res) => {
 exports.leaveGroup = async (req, res) => {
   try {
     const { conversationId } = req.params
-    const { newAdmins = [] } = req.body // Default to an empty array if newAdmins is undefined
     const userId = req.user.id
 
-    // Fetch the conversation
+    // Fetch conversation
     const conversation = await Conversation.get({ conversationId })
-
     if (!conversation || conversation.type !== 'GROUP') {
       return res.status(400).json({ error: 'Invalid group conversation' })
     }
 
-    // Fetch all participants in the group
-    const participants = await ConversationParticipants.query('conversationId').eq(conversationId).using('conversationIdIndex').exec()
-
-    if (participants.length === 0) {
-      return res.status(404).json({ error: 'No participants found in this group' })
-    }
-
-    // Check if the user is a participant
-    const leavingParticipant = participants.find((p) => p.userId === userId)
-
-    if (!leavingParticipant) {
-      return res.status(403).json({ error: 'You are not a participant in this group' })
-    }
-
-    // If the user is the creator
+    // Creator cannot leave (must delete)
     if (conversation.creatorId === userId) {
-      const admins = participants.filter((p) => p.isAdmin && p.userId !== userId)
-
-      if (admins.length === 0) {
-        // If there are no admins, the creator must provide a list of new admins
-        if (newAdmins.length === 0) {
-          return res.status(400).json({
-            error: 'You must provide a list of user IDs to be admins before leaving the group'
-          })
-        }
-
-        // Validate that the new admins are participants
-        const validNewAdmins = newAdmins.filter((adminId) => participants.some((p) => p.userId === adminId))
-
-        if (validNewAdmins.length === 0) {
-          return res.status(400).json({
-            error: 'The provided user IDs must be valid participants in the group'
-          })
-        }
-
-        // Promote the new admins
-        await Promise.all(validNewAdmins.map((adminId) => ConversationParticipants.update({ userId: adminId, conversationId }, { isAdmin: true })))
-      }
-
-      // Mark the creator as having left the group
-      await Conversation.update({ conversationId }, { creatorLeft: true })
+      return res.status(403).json({ error: 'Creator cannot leave the group. Use delete instead.' })
     }
 
-    // If the user is the last participant, delete the conversation
-    if (participants.length === 1) {
-      await Promise.all([
-        // Delete all participants
-        ConversationParticipants.delete({ userId, conversationId }),
-        // Delete all messages
-        Message.query('conversationId')
-          .eq(conversationId)
-          .exec()
-          .then((messages) =>
-            Promise.all(
-              messages.map((message) =>
-                Message.delete({
-                  conversationId,
-                  messageId: message.messageId
-                })
-              )
-            )
-          ),
-        // Delete the conversation itself
-        Conversation.delete({ conversationId })
-      ])
-
-      return res.status(200).json({
-        message: 'Conversation deleted successfully as the last member left'
-      })
-    }
-
-    // Remove the user from the group
+    // Remove this user from participants
     await ConversationParticipants.delete({ userId, conversationId })
 
-    res.status(200).json({ message: 'You have left the group successfully' })
+    // Fetch user profile for system message
+    const user = await User.get({ id: userId })
+    const userName = user ? `${user.profile.firstName || ''} ${user.profile.lastName || ''}`.trim() : 'A user'
+
+    // System message (optional: you can emit this via socket, but for API you may want to save it)
+    await handleNewMessage(conversationId, 'SYSTEM', 'TEXT', `${userName} has left the group.`)
+
+    return res.status(200).json({
+      message: 'Left group successfully',
+      conversationId,
+      user: user
+        ? {
+            userId,
+            profile: user.profile
+          }
+        : null
+    })
   } catch (error) {
     console.error('Error leaving group:', error)
-    res.status(500).json({ error: 'Failed to leave the group' })
+    res.status(500).json({ error: 'Failed to leave group.' })
   }
 }
 

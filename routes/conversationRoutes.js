@@ -179,20 +179,19 @@ router.patch('/:conversationId/members/:userId/role', updateMemberRole)
 
 /**
  * @route   DELETE /api/conversations/:conversationId
- * @desc    Delete a conversation (only for the creator)
+ * @desc    Delete a group conversation (only for the creator). Sets isDeleted to true and removes all participants from the group.
  * @access  Authenticated user (Creator only)
  * @params  { conversationId: string }
- * @returns { message: string }
+ * @returns { message: string, conversationId: string }
  */
 router.delete('/:conversationId', deleteConversation)
 
 /**
  * @route   DELETE /api/conversations/:conversationId/leave
- * @desc    Leave a group conversation
+ * @desc    Leave a group conversation (for non-creator users). Removes only the requesting user from the group and creates a system message "abc has left the group."
  * @access  Authenticated user
  * @params  { conversationId: string }
- * @body    { newAdmins?: string[] } // Required if the creator is leaving and there are no admins
- * @returns { message: string }
+ * @returns { message: string, conversationId: string, user: { userId, profile } }
  */
 router.delete('/:conversationId/leave', leaveGroup)
 
