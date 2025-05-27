@@ -276,7 +276,8 @@ module.exports = (io) => {
         // Notify all participants in the conversation about the removal
         io.to(conversationId).emit('user-removed', {
           conversationId,
-          userId: targetUserId
+          userId: targetUserId,
+          removerId: userId
         })
 
         // Fetch display names for the system message
@@ -521,6 +522,110 @@ module.exports = (io) => {
         console.error('Error handling reject-user-in-group:', error)
         socket.emit('error', { message: 'Failed to handle user rejection.' })
       }
+    })
+
+    // DELETE GROUP (creator only)
+    socket.on('delete-group', async ({ conversationId }) => {
+      try {
+        // Fetch conversation
+        const conversation = await Conversation.get({ conversationId })
+        if (!conversation || conversation.type !== 'GROUP') {
+          return socket.emit('error', { message: 'Invalid group conversation' })
+        }
+
+        // Only the creator can delete
+        if (conversation.creatorId !== userId) {
+          return socket.emit('error', { message: 'Only the creator can delete this group.' })
+        }
+
+        // Set isDeleted to true
+        await Conversation.update({ conversationId }, { isDeleted: true })
+
+        // Remove all participants
+        const participants = await getParticipantsForConversation(conversationId)
+        const removePromises = participants.map((participant) => ConversationParticipants.delete({ userId: participant.userId, conversationId }))
+        await Promise.all(removePromises)
+
+        // Emit to all participants
+        io.to(conversationId).emit('deleted-group', { conversationId })
+
+        // Emit conversation-update to all participants
+        participants.forEach((participant) => {
+          const participantRoom = `user:${participant.userId}`
+          io.to(participantRoom).emit('conversation-update', {
+            conversationId,
+            lastMessageText: '[Group deleted]',
+            lastMessageAt: new Date().toISOString()
+          })
+        })
+      } catch (error) {
+        console.error('Error deleting group:', error)
+        socket.emit('error', { message: 'Failed to delete group.' })
+      }
+    })
+
+    // LEAVE GROUP (non-creator)
+    socket.on('leave-group', async ({ conversationId }) => {
+      try {
+        // Fetch conversation
+        const conversation = await Conversation.get({ conversationId })
+        if (!conversation || conversation.type !== 'GROUP') {
+          return socket.emit('error', { message: 'Invalid group conversation' })
+        }
+
+        // Creator cannot leave (must delete)
+        if (conversation.creatorId === userId) {
+          return socket.emit('error', { message: 'Creator cannot leave the group. Use delete instead.' })
+        }
+
+        // Remove this user from participants
+        await ConversationParticipants.delete({ userId, conversationId })
+
+        // Fetch user profile for system message
+        const user = await User.get({ id: userId })
+        const userName = user ? `${user.profile.firstName || ''} ${user.profile.lastName || ''}`.trim() : 'A user'
+
+        // System message
+        const systemContent = `${userName} has left the group.`
+        const systemMessage = await handleNewMessage(conversationId, 'SYSTEM', 'TEXT', systemContent)
+        io.to(conversationId).emit('new-message', systemMessage)
+
+        // Emit to all participants with user data
+        io.to(conversationId).emit('left-group', {
+          conversationId,
+          user: user
+            ? {
+                userId,
+                profile: user.profile
+              }
+            : null
+        })
+
+        // Emit conversation-update to all participants
+        const participants = await getParticipantsForConversation(conversationId)
+        participants.forEach((participant) => {
+          const participantRoom = `user:${participant.userId}`
+          io.to(participantRoom).emit('conversation-update', {
+            conversationId,
+            lastMessageText: systemContent,
+            lastMessageAt: systemMessage.createdAt
+          })
+        })
+      } catch (error) {
+        console.error('Error leaving group:', error)
+        socket.emit('error', { message: 'Failed to leave group.' })
+      }
+    })
+
+    // START TYPING
+    socket.on('typing', ({ conversationId, userId }) => {
+      // Broadcast to all other users in the conversation except the sender
+      socket.to(conversationId).emit('typing', { conversationId, userId })
+    })
+
+    // STOP TYPING
+    socket.on('stop-typing', ({ conversationId, userId }) => {
+      socket.to(conversationId).emit('stop-typing', { conversationId, userId })
     })
 
     // DISCONNECT
